@@ -1,23 +1,33 @@
 import express from 'express';
 import { query } from '../db.js';
-import { verifyToken as verifyJWT } from '../utils/jwt.js'; // Renamed import
+import { verifyToken } from '../utils/jwt.js';
 
 const router = express.Router();
 
-// Middleware to verify JWT token - FIXED: No naming conflict
+// Middleware to verify JWT token
 const authenticateToken = (req, res, next) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) {
-    return res.status(401).json({ success: false, error: 'No token provided' });
-  }
-  
   try {
-    const decoded = verifyJWT(token); // Use the renamed import
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    
+    if (!token) {
+      return res.status(401).json({ 
+        success: false, 
+        error: 'Access token required' 
+      });
+    }
+
+    console.log('🔐 Verifying token...');
+    const decoded = verifyToken(token);
     req.userId = decoded.userId;
+    console.log('✅ Token verified for user:', req.userId);
     next();
   } catch (error) {
     console.error('❌ Token verification failed:', error.message);
-    return res.status(401).json({ success: false, error: 'Invalid token' });
+    return res.status(401).json({ 
+      success: false, 
+      error: 'Invalid or expired token' 
+    });
   }
 };
 
@@ -27,58 +37,81 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
     const userId = req.userId;
     console.log('📊 Fetching dashboard for user ID:', userId);
 
-    // Get user info
+    // 1. Get user info
+    console.log('👤 Querying user data...');
     const userResult = await query(
       'SELECT id, full_name, email, department, academic_year FROM users WHERE id = ?',
       [userId]
     );
     
     if (userResult.length === 0) {
-      return res.status(404).json({ success: false, error: 'User not found' });
+      console.log('❌ User not found in database');
+      return res.status(404).json({ 
+        success: false, 
+        error: 'User not found' 
+      });
     }
 
     const user = userResult[0];
-    console.log('👤 User found:', user.full_name);
+    console.log('✅ User found:', user.full_name);
 
-    // Get next class (mock data for now - you'll need to create classes table)
+    // 2. Check if user is HOC
+    console.log('👑 Checking HOC status...');
+    let isHOC = false;
+    try {
+      const hocResult = await query(
+        'SELECT COUNT(*) as hoc_count FROM classes WHERE hoc_user_id = ?',
+        [userId]
+      );
+      isHOC = hocResult[0]?.hoc_count > 0;
+      console.log('🎯 HOC status:', isHOC);
+    } catch (hocError) {
+      console.log('📝 Classes table might not exist yet, defaulting to non-HOC');
+      isHOC = false;
+    }
+
+    // 3. Mock data (since classes table might not exist yet)
+    console.log('📋 Generating mock data...');
     const nextClass = {
       id: 1,
       class_name: 'Data Structures',
       instructor: 'Prof. Ahmed',
-      start_time: new Date().setHours(10, 30, 0, 0),
+      start_time: new Date().toISOString(),
       location: 'Lab 302',
       status: 'on'
     };
 
-    // Get today's classes (mock data for now)
     const todaySchedule = [
       { id: 1, time: '09:00 AM', class: 'Mathematics', status: 'completed' },
       { id: 2, time: '10:30 AM', class: 'Data Structures', status: 'ongoing' },
       { id: 3, time: '01:00 PM', class: 'Web Development', status: 'upcoming' },
     ];
 
-    // Get recent updates (mock data for now)
     const recentUpdates = [
-      { id: 1, title: 'Schedule Changed', desc: 'Physics class moved to 3 PM', time: '2h ago', type: 'reschedule' },
-      { id: 2, title: 'Class Cancelled', desc: 'Chemistry lab cancelled today', time: '4h ago', type: 'cancel' },
+      { 
+        id: 1, 
+        title: 'Welcome to Synapse!', 
+        desc: 'Your student companion app is ready', 
+        time: 'Just now', 
+        type: 'info' 
+      },
+      { 
+        id: 2, 
+        title: 'Schedule Changed', 
+        desc: 'Physics class moved to 3 PM', 
+        time: '2h ago', 
+        type: 'reschedule' 
+      },
     ];
 
-    // Check if user is HOC
-    const hocResult = await query(
-      'SELECT COUNT(*) as hoc_count FROM classes WHERE hoc_user_id = ?',
-      [userId]
-    );
-    const isHOC = hocResult[0]?.hoc_count > 0;
-
-    console.log('✅ Sending dashboard data for:', user.full_name);
-
-    // Format response with CORRECT field names
-    res.json({
+    // 4. Format response
+    console.log('📦 Sending dashboard response...');
+    const responseData = {
       success: true,
       data: {
         user: {
           id: user.id,
-          fullName: user.full_name, // Correct field name
+          fullName: user.full_name,
           email: user.email,
           department: user.department,
           academicYear: user.academic_year,
@@ -88,12 +121,43 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
         recentUpdates: recentUpdates,
         isHOC: isHOC,
       }
-    });
+    };
+
+    console.log('✅ Dashboard data sent successfully');
+    res.json(responseData);
+
   } catch (error) {
-    console.error('❌ Dashboard error:', error);
+    console.error('💥 DASHBOARD ERROR:', error);
+    console.error('Error stack:', error.stack);
+    
     res.status(500).json({ 
       success: false, 
-      error: 'Internal server error: ' + error.message 
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+});
+
+// Test endpoint - no authentication required
+router.get('/test', async (req, res) => {
+  try {
+    console.log('🧪 Testing homepage routes...');
+    
+    // Test database connection
+    const testResult = await query('SELECT 1 + 1 AS solution');
+    console.log('✅ Database test passed:', testResult[0].solution);
+    
+    res.json({ 
+      success: true, 
+      message: 'Homepage routes are working',
+      database: 'Connected',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Test endpoint error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Test failed: ' + error.message 
     });
   }
 });
@@ -102,7 +166,7 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
 router.get('/health', (req, res) => {
   res.json({ 
     success: true, 
-    message: 'Homepage routes are working',
+    message: 'Homepage routes are healthy',
     timestamp: new Date().toISOString()
   });
 });

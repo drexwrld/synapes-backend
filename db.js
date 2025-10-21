@@ -59,6 +59,23 @@ export async function getDB() {
   return db;
 }
 
+// ADD THIS FUNCTION:
+export async function query(sql, values) {
+  try {
+    const pool = await getDB();
+    if (!pool) throw new Error('Database pool not available');
+    
+    const connection = await pool.getConnection();
+    const [results] = await connection.query(sql, values);
+    connection.release();
+    
+    return results;
+  } catch (error) {
+    console.error('Query error:', error.message);
+    throw error;
+  }
+}
+
 export async function testConnection() {
   try {
     const pool = await getDB();

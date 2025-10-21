@@ -9,7 +9,7 @@ import hocRoutes from './routes/HOC.js'; // Make sure this file exists
 
 import { initializeDatabase } from './db.js';
 
-// Load environment variables
+// Load environment variabl
 dotenv.config();
 
 const app = express();

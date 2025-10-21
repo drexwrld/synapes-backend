@@ -1,5 +1,6 @@
 import express from 'express';
 import { query } from '../db.js';
+import { verifyToken } from '../utils/jwt.js';
 
 const router = express.Router();
 
@@ -9,24 +10,37 @@ const verifyToken = (req, res, next) => {
   if (!token) {
     return res.status(401).json({ success: false, error: 'No token provided' });
   }
-  req.userId = 1; // Replace with actual user ID from token
-  next();
+  
+  try {
+    const decoded = verifyToken(token);
+    req.userId = decoded.userId; // Use the actual user ID from the token
+    next();
+  } catch (error) {
+    return res.status(401).json({ success: false, error: 'Invalid token' });
+  }
 };
 
 // Get dashboard data
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
     const userId = req.userId;
+    console.log('📊 Fetching dashboard for user ID:', userId);
 
-    // Get user info
+    // Get user info - FIXED: Use correct column names from your database
     const userResult = await query(
-      'SELECT full_name, email, department, academic_year FROM users WHERE id = ?',
+      'SELECT id, full_name, email, department, academic_year FROM users WHERE id = ?',
       [userId]
     );
+    
+    if (userResult.length === 0) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
     const user = userResult[0];
+    console.log('👤 User found:', user.full_name);
 
     // Get next class
-    const nextClass = await query(
+    const nextClassResult = await query(
       `SELECT id, class_name, instructor, start_time, end_time, location, status 
        FROM classes 
        WHERE user_id = ? AND start_time > NOW()
@@ -36,7 +50,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     );
 
     // Get today's classes
-    const todayClasses = await query(
+    const todayClassesResult = await query(
       `SELECT id, class_name, instructor, start_time, end_time, location, status 
        FROM classes 
        WHERE user_id = ? AND DATE(start_time) = CURDATE()
@@ -45,7 +59,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     );
 
     // Get recent updates
-    const updates = await query(
+    const updatesResult = await query(
       `SELECT id, title, description, update_type, created_at 
        FROM schedule_updates 
        WHERE user_id = ?
@@ -54,33 +68,46 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       [userId]
     );
 
+    // Check if user is HOC
+    const hocResult = await query(
+      'SELECT COUNT(*) as hoc_count FROM classes WHERE hoc_user_id = ?',
+      [userId]
+    );
+    const isHOC = hocResult[0].hoc_count > 0;
+
+    // Format response with CORRECT field names
     res.json({
       success: true,
       data: {
         user: {
-          name: user?.full_name,
-          department: user?.department,
-          academicYear: user?.academic_year,
+          id: user.id,
+          fullName: user.full_name, // FIXED: Use full_name from database
+          email: user.email,
+          department: user.department,
+          academicYear: user.academic_year,
         },
-        nextClass: nextClass[0] || null,
-        todaySchedule: todayClasses.map(c => ({
+        nextClass: nextClassResult[0] || null,
+        todaySchedule: todayClassesResult.map(c => ({
           id: c.id,
-          time: new Date(c.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+          time: new Date(c.start_time).toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit' 
+          }),
           class: c.class_name,
-          status: 'upcoming',
+          status: c.status || 'upcoming',
         })),
-        recentUpdates: updates.map(u => ({
+        recentUpdates: updatesResult.map(u => ({
           id: u.id,
           title: u.title,
           desc: u.description,
-          time: '2h ago',
+          time: '2h ago', // You can format this properly later
           type: u.update_type,
         })),
-        isHOC: false,
+        isHOC: isHOC,
       }
     });
   } catch (error) {
-    console.error('Dashboard error:', error);
+    console.error('❌ Dashboard error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

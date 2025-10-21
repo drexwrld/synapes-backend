@@ -171,4 +171,6 @@ router.get('/health', (req, res) => {
   });
 });
 
+// 🔥 ADD THESE EXPORTS - REPLACE THE CURRENT EXPORT
+export { authenticateToken };
 export default router;

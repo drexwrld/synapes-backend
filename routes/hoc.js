@@ -1,117 +1,103 @@
 import express from 'express';
-import { query } from '../db.js';
-import { authenticateToken } from './homepage.js';
+import cors from 'cors';
+import dotenv from 'dotenv';
 
-const router = express.Router();
+// Routes imports - make sure these file names match exactly
+import authRoutes from './routes/auth.js';
+import homepageRoutes from './routes/homepage.js';
+import hocRoutes from 'backend/routes/HOC.js'; // Make sure this file exists
 
-// Get all classes for HOC
-router.get('/my-classes', authenticateToken, async (req, res) => {
-  try {
-    const userId = req.userId;
-    
-    const classes = await query(
-      `SELECT * FROM classes 
-       WHERE hoc_user_id = ? 
-       ORDER BY start_time ASC`,
-      [userId]
-    );
+import { initializeDatabase } from './db.js';
 
-    res.json({
-      success: true,
-      data: classes
-    });
-  } catch (error) {
-    console.error('HOC classes error:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
+// Load environment variables
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+const NODE_ENV = process.env.NODE_ENV || 'development';
+
+// CORS configuration
+app.use(cors({
+  origin: true, // Allow all origins for now
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true
+}));
+
+// Body parsing middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
+  next();
 });
 
-// Cancel a class
-router.post('/cancel-class', authenticateToken, async (req, res) => {
-  try {
-    const { classId, reason } = req.body;
-    const userId = req.userId;
-
-    // Verify HOC owns this class
-    const classResult = await query(
-      'SELECT * FROM classes WHERE id = ? AND hoc_user_id = ?',
-      [classId, userId]
-    );
-
-    if (classResult.length === 0) {
-      return res.status(403).json({ 
-        success: false, 
-        error: 'Not authorized to cancel this class' 
-      });
-    }
-
-    // Update class status
-    await query(
-      'UPDATE classes SET status = "cancelled" WHERE id = ?',
-      [classId]
-    );
-
-    // Log the update
-    await query(
-      `INSERT INTO schedule_updates 
-       (class_id, update_type, reason, created_by) 
-       VALUES (?, 'cancelled', ?, ?)`,
-      [classId, reason, userId]
-    );
-
-    res.json({
-      success: true,
-      message: 'Class cancelled successfully'
-    });
-  } catch (error) {
-    console.error('Cancel class error:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    message: 'Server is healthy',
+    timestamp: new Date().toISOString(),
+    environment: NODE_ENV,
+    uptime: process.uptime()
+  });
 });
 
-// Reschedule a class
-router.post('/reschedule-class', authenticateToken, async (req, res) => {
-  try {
-    const { classId, newTime, newRoom, reason } = req.body;
-    const userId = req.userId;
-
-    // Verify HOC owns this class
-    const classResult = await query(
-      'SELECT * FROM classes WHERE id = ? AND hoc_user_id = ?',
-      [classId, userId]
-    );
-
-    if (classResult.length === 0) {
-      return res.status(403).json({ 
-        success: false, 
-        error: 'Not authorized to reschedule this class' 
-      });
-    }
-
-    const oldClass = classResult[0];
-
-    // Update class
-    await query(
-      'UPDATE classes SET start_time = ?, location = ?, status = "rescheduled" WHERE id = ?',
-      [newTime, newRoom, classId]
-    );
-
-    // Log the update
-    await query(
-      `INSERT INTO schedule_updates 
-       (class_id, update_type, old_time, new_time, old_room, new_room, reason, created_by) 
-       VALUES (?, 'rescheduled', ?, ?, ?, ?, ?, ?)`,
-      [classId, oldClass.start_time, newTime, oldClass.location, newRoom, reason, userId]
-    );
-
-    res.json({
-      success: true,
-      message: 'Class rescheduled successfully'
-    });
-  } catch (error) {
-    console.error('Reschedule class error:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Synapse Backend API',
+    version: '1.0.0',
+    status: 'running',
+    environment: NODE_ENV
+  });
 });
 
-export default router;
+// API routes
+app.use('/api/auth', authRoutes);
+app.use('/api/home', homepageRoutes);
+app.use('/api/hoc', hocRoutes);
+
+// 404 handler for undefined API routes
+app.use('/api/*', (req, res) => {
+  res.status(404).json({
+    error: 'Endpoint not found',
+    message: `The requested endpoint ${req.originalUrl} does not exist`,
+    availableEndpoints: ['/api/auth', '/api/home', '/api/hoc', '/health']
+  });
+});
+
+// Global error handling middleware
+app.use((err, req, res, next) => {
+  console.error('🚨 Unhandled Error:', err);
+  
+  res.status(500).json({
+    error: 'Internal Server Error',
+    message: 'Something went wrong!',
+    ...(NODE_ENV === 'development' && { details: err.message })
+  });
+});
+
+// Initialize database and start server
+const startServer = async () => {
+  try {
+    console.log('🟡 Initializing database...');
+    await initializeDatabase();
+    console.log('✅ Database initialized successfully');
+
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`🌐 Environment: ${NODE_ENV}`);
+      console.log(`📍 Health check: http://localhost:${PORT}/health`);
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+// Start the server
+startServer();
+
+export default app;

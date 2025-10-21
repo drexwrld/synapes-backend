@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 // Routes imports - make sure these file names match exactly
 import authRoutes from './routes/auth.js';
 import homepageRoutes from './routes/homepage.js';
-import hocRoutes from './routes/HOC.js'; // Make sure this file exists
+import hocRoutes from ''; // Make sure this file exists
 
 import { initializeDatabase } from './db.js';
 

@@ -1,20 +1,9 @@
 import express from "express";
-import { getDB } from "../db.js";
+import { query } from "../db.js";
 import { hashPassword, verifyPassword } from "../utils/hash.js";
 import { createToken } from "../utils/jwt.js";
 
 const router = express.Router();
-
-async function executeQuery(query, params = []) {
-  try {
-    const db = await getDB();
-    const [result] = await db.execute(query, params);
-    return result;
-  } catch (error) {
-    console.error('Database query error:', error);
-    throw new Error('Database operation failed: ' + error.message);
-  }
-}
 
 // TEST ENDPOINT - Add this first
 router.get("/test", async (req, res) => {
@@ -26,15 +15,15 @@ router.get("/test", async (req, res) => {
     console.log('🗄️  DATABASE_HOST:', process.env.DATABASE_HOST);
     
     // Test 2: Database connection
-    const db = await getDB();
-    console.log('✅ Database connected');
+    const testResult = await query('SELECT 1 + 1 AS solution');
+    console.log('✅ Database connected, test query result:', testResult[0].solution);
     
     // Test 3: Query users table
-    const [users] = await db.execute('SELECT COUNT(*) as count FROM users');
+    const users = await query('SELECT COUNT(*) as count FROM users');
     console.log('📊 Users in database:', users[0].count);
     
     // Test 4: Check table structure
-    const [tableInfo] = await db.execute('DESCRIBE users');
+    const tableInfo = await query('DESCRIBE users');
     console.log('📋 Users table columns:', tableInfo.map(col => col.Field));
     
     res.json({ 
@@ -68,7 +57,7 @@ router.post("/signup", async (req, res) => {
     }
 
     console.log('🔍 Checking for existing user...');
-    const existing = await executeQuery("SELECT id FROM users WHERE email = ?", [email]);
+    const existing = await query("SELECT id FROM users WHERE email = ?", [email]);
     if (existing.length > 0) {
       return res.status(400).json({ 
         success: false, 
@@ -81,13 +70,13 @@ router.post("/signup", async (req, res) => {
     console.log('✅ Password hashed');
 
     console.log('💾 Creating user in database...');
-    const result = await executeQuery(
+    const result = await query(
       "INSERT INTO users (full_name, email, password_hash, department, academic_year, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
       [fullName, email, password_hash, department, academicYear]
     );
     console.log('✅ User created with ID:', result.insertId);
 
-    const userRows = await executeQuery(
+    const userRows = await query(
       "SELECT id, full_name, email, department, academic_year, created_at FROM users WHERE id = ?",
       [result.insertId]
     );
@@ -134,41 +123,36 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    // Test database connection first
-    console.log('🔌 3. Testing database connection...');
-    const db = await getDB();
-    console.log('✅ 4. Database connected');
-
-    console.log('🔍 5. Querying user...');
-    const rows = await executeQuery("SELECT * FROM users WHERE email = ?", [email]);
-    console.log('📊 6. Found users:', rows.length);
+    console.log('🔍 3. Querying user...');
+    const rows = await query("SELECT * FROM users WHERE email = ?", [email]);
+    console.log('📊 4. Found users:', rows.length);
 
     if (rows.length === 0) {
-      console.log('❌ 7. No user found with email:', email);
+      console.log('❌ 5. No user found with email:', email);
       return res.status(401).json({ 
         success: false, 
         error: "Invalid email or password." 
       });
     }
 
-    console.log('🔐 8. Verifying password...');
+    console.log('🔐 6. Verifying password...');
     const user = rows[0];
     const valid = await verifyPassword(password, user.password_hash);
-    console.log('✅ 9. Password valid:', valid);
+    console.log('✅ 7. Password valid:', valid);
 
     if (!valid) {
-      console.log('❌ 10. Password verification failed');
+      console.log('❌ 8. Password verification failed');
       return res.status(401).json({ 
         success: false, 
         error: "Invalid email or password." 
       });
     }
 
-    console.log('🎫 11. Creating token...');
+    console.log('🎫 9. Creating token...');
     const token = createToken(user);
-    console.log('✅ 12. Token created successfully');
+    console.log('✅ 10. Token created successfully');
 
-    console.log('🎉 13. Login successful for user:', user.email);
+    console.log('🎉 11. Login successful for user:', user.email);
 
     res.json({
       success: true,

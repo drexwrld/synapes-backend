@@ -1,6 +1,6 @@
 import express from 'express';
 import { verifyToken } from '../utils/jwt.js';
-import { getDB } from '../db.js';
+import { query } from '../db.js';
 
 const router = express.Router();
 
@@ -43,7 +43,7 @@ const withAdmin = (req, res, next) => {
     const decoded = verifyToken(token);
     
     // Check if user has admin role (you can modify this based on your user structure)
-    if (!decoded.isAdmin && decoded.role !== 'admin') {
+    if (decoded.role !== 'admin') {
       return res.status(403).json({
         success: false,
         error: 'Access denied. Admin privileges required.'
@@ -57,21 +57,6 @@ const withAdmin = (req, res, next) => {
     return res.status(401).json({
       success: false,
       error: 'Invalid or expired token.'
-    });
-  }
-};
-
-// Database connection HOC middleware
-const withDB = async (req, res, next) => {
-  try {
-    const db = await getDB();
-    req.db = db;
-    next();
-  } catch (error) {
-    console.error('Database HOC error:', error.message);
-    return res.status(500).json({
-      success: false,
-      error: 'Database connection failed.'
     });
   }
 };
@@ -145,38 +130,6 @@ router.get('/protected', withAuth, (req, res) => {
   });
 });
 
-// Admin only route
-router.get('/admin', withAuth, withAdmin, (req, res) => {
-  res.json({
-    success: true,
-    message: 'Welcome, Admin!',
-    user: req.user,
-    adminFeatures: ['user_management', 'analytics', 'system_settings']
-  });
-});
-
-// Route with database connection
-router.get('/data', withAuth, withDB, async (req, res) => {
-  try {
-    const db = req.db;
-    // Example query - modify based on your needs
-    const [results] = await db.execute('SELECT * FROM users LIMIT 5');
-    
-    res.json({
-      success: true,
-      message: 'Data retrieved successfully',
-      data: results,
-      count: results.length
-    });
-  } catch (error) {
-    console.error('Data route error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch data'
-    });
-  }
-});
-
 // Route with rate limiting
 router.get('/limited', withRateLimit(60000, 10), (req, res) => {
   res.json({
@@ -190,15 +143,13 @@ router.post('/secure-data',
   withRateLimit(60000, 5), // 5 requests per minute
   withAuth,                // Requires authentication
   withValidation(),        // Add validation schema if needed
-  withDB,                  // Database connection
   async (req, res) => {
     try {
       const { data } = req.body;
-      const userId = req.user.userId;
+      const userId = req.user.id || req.user.userId;
 
       // Example: Save data to database
-      const db = req.db;
-      const [result] = await db.execute(
+      const result = await query(
         'INSERT INTO user_data (user_id, data, created_at) VALUES (?, ?, NOW())',
         [userId, JSON.stringify(data)]
       );
@@ -228,8 +179,6 @@ router.get('/', (req, res) => {
     message: 'HOC Routes are working!',
     availableEndpoints: [
       'GET /api/hoc/protected (requires auth)',
-      'GET /api/hoc/admin (requires admin)',
-      'GET /api/hoc/data (requires auth + db)',
       'GET /api/hoc/limited (rate limited)',
       'POST /api/hoc/secure-data (multiple HOCs)'
     ],
@@ -256,7 +205,6 @@ router.get('/test', withRateLimit(60000, 20), async (req, res) => {
       features: [
         'Authentication HOC',
         'Admin Authorization HOC',
-        'Database Connection HOC',
         'Validation HOC',
         'Rate Limiting HOC'
       ],
@@ -274,7 +222,6 @@ router.get('/test', withRateLimit(60000, 20), async (req, res) => {
 export {
   withAuth,
   withAdmin,
-  withDB,
   withValidation,
   withRateLimit
 };

@@ -39,10 +39,9 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
 
     // 1. Get user info
     console.log('👤 Querying user data...');
-    const userResult = await query(
-      'SELECT id, full_name, email, department, academic_year FROM users WHERE id = ?',
-      [userId]
-    );
+   const userResult = await query(
+  'SELECT id, full_name, email, department, academic_year FROM users WHERE id = $1',
+  [userId])
     
     if (userResult.length === 0) {
       console.log('❌ User not found in database');
@@ -59,10 +58,10 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
     console.log('👑 Checking HOC status...');
     let isHOC = false;
     try {
-      const hocResult = await query(
-        'SELECT COUNT(*) as hoc_count FROM classes WHERE hoc_user_id = ?',
-        [userId]
-      );
+     const hocResult = await query(
+  'SELECT COUNT(*) as hoc_count FROM classes WHERE hoc_user_id = $1',
+  [userId]
+    );
       isHOC = hocResult[0]?.hoc_count > 0;
       console.log('🎯 HOC status:', isHOC);
     } catch (hocError) {

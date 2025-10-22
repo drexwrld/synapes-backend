@@ -23,14 +23,18 @@ router.get("/test", async (req, res) => {
     console.log('📊 Users in database:', users[0].count);
     
     // Test 4: Check table structure
-    const tableInfo = await query('DESCRIBE users');
-    console.log('📋 Users table columns:', tableInfo.map(col => col.Field));
+    const tableInfo = await query(`
+      SELECT column_name, data_type 
+      FROM information_schema.columns 
+      WHERE table_name = 'users'
+    `);
+    console.log('📋 Users table columns:', tableInfo.map(col => col.column_name));
     
     res.json({ 
       success: true, 
       message: 'System test passed',
       usersCount: users[0].count,
-      tableColumns: tableInfo.map(col => col.Field)
+      tableColumns: tableInfo.map(col => col.column_name)
     });
     
   } catch (error) {
@@ -57,7 +61,7 @@ router.post("/signup", async (req, res) => {
     }
 
     console.log('🔍 Checking for existing user...');
-    const existing = await query("SELECT id FROM users WHERE email = ?", [email]);
+    const existing = await query("SELECT id FROM users WHERE email = $1", [email]);
     if (existing.length > 0) {
       return res.status(400).json({ 
         success: false, 
@@ -71,14 +75,15 @@ router.post("/signup", async (req, res) => {
 
     console.log('💾 Creating user in database...');
     const result = await query(
-      "INSERT INTO users (full_name, email, password_hash, department, academic_year, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
+      `INSERT INTO users (full_name, email, password_hash, department, academic_year, created_at) 
+       VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING id`,
       [fullName, email, password_hash, department, academicYear]
     );
-    console.log('✅ User created with ID:', result.insertId);
+    console.log('✅ User created with ID:', result[0].id);
 
     const userRows = await query(
-      "SELECT id, full_name, email, department, academic_year, created_at FROM users WHERE id = ?",
-      [result.insertId]
+      "SELECT id, full_name, email, department, academic_year, created_at FROM users WHERE id = $1",
+      [result[0].id]
     );
 
     const user = userRows[0];
@@ -124,7 +129,7 @@ router.post("/login", async (req, res) => {
     }
 
     console.log('🔍 3. Querying user...');
-    const rows = await query("SELECT * FROM users WHERE email = ?", [email]);
+    const rows = await query("SELECT * FROM users WHERE email = $1", [email]);
     console.log('📊 4. Found users:', rows.length);
 
     if (rows.length === 0) {

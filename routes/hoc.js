@@ -149,15 +149,16 @@ router.post('/secure-data',
       const userId = req.user.id || req.user.userId;
 
       // Example: Save data to database
-      const result = await query(
-        'INSERT INTO user_data (user_id, data, created_at) VALUES (?, ?, NOW())',
+     const result = await query(
+        'INSERT INTO user_data (user_id, data, created_at) VALUES ($1, $2, NOW()) RETURNING id',
         [userId, JSON.stringify(data)]
       );
+
 
       res.json({
         success: true,
         message: 'Data saved successfully',
-        dataId: result.insertId,
+        dataId: result[0].id,
         user: req.user
       });
     } catch (error) {

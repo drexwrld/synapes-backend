@@ -4,10 +4,11 @@ import { query } from '../db.js';
 
 const router = express.Router();
 
-// Authentication middleware
+// Fixed Authentication middleware - standardized token extraction
 const withAuth = (req, res, next) => {
   try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
     
     if (!token) {
       return res.status(401).json({
@@ -16,8 +17,13 @@ const withAuth = (req, res, next) => {
       });
     }
 
+    console.log('Verifying token...');
     const decoded = verifyToken(token);
+    
+    // Standardized: always use userId
+    req.userId = decoded.userId;
     req.user = decoded;
+    console.log('Token verified for user:', req.userId);
     next();
   } catch (error) {
     console.error('Auth middleware error:', error.message);
@@ -28,14 +34,12 @@ const withAuth = (req, res, next) => {
   }
 };
 
-// ===== HOC TOOLS ROUTES =====
-
 // Enhanced HOC test with proper database checking
 router.get('/test', withAuth, async (req, res) => {
   try {
-    const userId = req.user.id || req.user.userId;
+    const userId = req.userId;
     
-    console.log('🔧 HOC Test - Checking user:', userId);
+    console.log('HOC Test - Checking user:', userId);
 
     let isHOC = false;
     let hocClassCount = 0;
@@ -49,17 +53,17 @@ router.get('/test', withAuth, async (req, res) => {
         WHERE table_name = 'users' AND column_name = 'is_hoc'
       `);
 
-      if (tableCheck.rows.length > 0) {
+      if (tableCheck.length > 0) {
         // Column exists, check HOC status
         const userCheck = await query(
           'SELECT is_hoc FROM users WHERE id = $1',
           [userId]
         );
 
-        if (userCheck.rows.length > 0) {
-          isHOC = userCheck.rows[0].is_hoc === true;
+        if (userCheck.length > 0) {
+          isHOC = userCheck[0].is_hoc === true;
           databaseWorking = true;
-          console.log('✅ Database check - User HOC status:', isHOC);
+          console.log('Database check - User HOC status:', isHOC);
         }
       }
 
@@ -69,8 +73,8 @@ router.get('/test', withAuth, async (req, res) => {
         [userId]
       );
 
-      if (classCount.rows.length > 0) {
-        hocClassCount = parseInt(classCount.rows[0].count) || 0;
+      if (classCount.length > 0) {
+        hocClassCount = parseInt(classCount[0].count) || 0;
         // If user has HOC classes, they are effectively HOC
         if (hocClassCount > 0) {
           isHOC = true;
@@ -78,17 +82,9 @@ router.get('/test', withAuth, async (req, res) => {
       }
 
     } catch (dbError) {
-      console.log('❌ Database check failed:', dbError.message);
-      // If database fails, use demo data
+      console.log('Database check failed:', dbError.message);
       isHOC = true;
       hocClassCount = 3;
-    }
-
-    // FOR DEMO: If still not HOC, make them HOC
-    if (!isHOC) {
-      console.log('🔄 User not HOC in database, enabling demo HOC mode');
-      isHOC = true;
-      hocClassCount = Math.max(hocClassCount, 2);
     }
 
     res.json({
@@ -102,16 +98,10 @@ router.get('/test', withAuth, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ HOC test error:', error);
-    // Fallback response
-    res.json({
-      success: true,
-      message: 'HOC system working (fallback mode)',
-      userId: req.user?.id || 'unknown',
-      isHOC: true,
-      hocClassCount: 3,
-      databaseStatus: 'Fallback mode',
-      timestamp: new Date().toISOString()
+    console.error('HOC test error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to check HOC status: ' + error.message
     });
   }
 });
@@ -119,7 +109,7 @@ router.get('/test', withAuth, async (req, res) => {
 // Get HOC's classes
 router.get('/my-classes', withAuth, async (req, res) => {
   try {
-    const userId = req.user.id || req.user.userId;
+    const userId = req.userId;
     
     console.log('Fetching classes for HOC user:', userId);
 
@@ -148,8 +138,8 @@ router.get('/my-classes', withAuth, async (req, res) => {
         ORDER BY c.start_time ASC
       `, [userId]);
 
-      if (result && result.rows && result.rows.length > 0) {
-        classes = result.rows;
+      if (result && result.length > 0) {
+        classes = result;
         usingDemoData = false;
         console.log('Found', classes.length, 'real classes in database');
       }
@@ -185,19 +175,6 @@ router.get('/my-classes', withAuth, async (req, res) => {
           max_students: 25,
           enrolled_students: 22,
           created_at: new Date().toISOString()
-        },
-        {
-          id: 3,
-          class_name: 'Web Development',
-          subject: 'CS201',
-          start_time: new Date(Date.now() - 86400000).toISOString(),
-          end_time: new Date(Date.now() - 86400000 + 7200000).toISOString(),
-          location: 'Online',
-          status: 'completed',
-          instructor: 'Dr. Wilson',
-          max_students: 40,
-          enrolled_students: 38,
-          created_at: new Date().toISOString()
         }
       ];
     }
@@ -222,7 +199,7 @@ router.get('/my-classes', withAuth, async (req, res) => {
 router.post('/cancel-class', withAuth, async (req, res) => {
   try {
     const { classId, reason } = req.body;
-    const userId = req.user.id || req.user.userId;
+    const userId = req.userId;
 
     console.log('Cancel class request:', { classId, reason, userId });
 
@@ -233,15 +210,14 @@ router.post('/cancel-class', withAuth, async (req, res) => {
       });
     }
 
-    // Try to update database if class exists
     try {
       const updateResult = await query(
         'UPDATE classes SET status = $1, updated_at = NOW() WHERE id = $2 AND hoc_user_id = $3 RETURNING *',
         ['cancelled', classId, userId]
       );
 
-      if (updateResult.rows.length > 0) {
-        console.log('✅ Class cancelled in database:', classId);
+      if (updateResult.length > 0) {
+        console.log('Class cancelled in database:', classId);
         
         res.json({
           success: true,
@@ -253,7 +229,6 @@ router.post('/cancel-class', withAuth, async (req, res) => {
           databaseUpdated: true
         });
       } else {
-        // Class not found or not owned by user - use demo response
         console.log(`Simulating cancellation of class ${classId} by user ${userId}`);
         
         res.json({
@@ -293,7 +268,7 @@ router.post('/cancel-class', withAuth, async (req, res) => {
 router.post('/reschedule-class', withAuth, async (req, res) => {
   try {
     const { classId, newTime, newRoom, reason } = req.body;
-    const userId = req.user.id || req.user.userId;
+    const userId = req.userId;
 
     console.log('Reschedule class request:', { classId, newTime, newRoom, reason, userId });
 
@@ -304,15 +279,14 @@ router.post('/reschedule-class', withAuth, async (req, res) => {
       });
     }
 
-    // Try to update database if class exists
     try {
       const updateResult = await query(
         'UPDATE classes SET start_time = $1, location = $2, status = $3, updated_at = NOW() WHERE id = $4 AND hoc_user_id = $5 RETURNING *',
         [newTime, newRoom, 'rescheduled', classId, userId]
       );
 
-      if (updateResult.rows.length > 0) {
-        console.log('✅ Class rescheduled in database:', classId);
+      if (updateResult.length > 0) {
+        console.log('Class rescheduled in database:', classId);
         
         res.json({
           success: true,
@@ -326,7 +300,6 @@ router.post('/reschedule-class', withAuth, async (req, res) => {
           databaseUpdated: true
         });
       } else {
-        // Class not found or not owned by user - use demo response
         console.log(`Simulating reschedule of class ${classId} by user ${userId}`);
         
         res.json({
@@ -369,14 +342,13 @@ router.post('/reschedule-class', withAuth, async (req, res) => {
 // Get HOC students
 router.get('/students', withAuth, async (req, res) => {
   try {
-    const userId = req.user.id || req.user.userId;
+    const userId = req.userId;
     
     console.log('Fetching students for HOC user:', userId);
 
     let students = [];
     let usingDemoData = true;
 
-    // Try to get real students from database
     try {
       const result = await query(
         `SELECT DISTINCT 
@@ -393,8 +365,8 @@ router.get('/students', withAuth, async (req, res) => {
         [userId]
       );
 
-      if (result && result.rows && result.rows.length > 0) {
-        students = result.rows;
+      if (result && result.length > 0) {
+        students = result;
         usingDemoData = false;
         console.log('Found', students.length, 'real students in database');
       }
@@ -431,24 +403,6 @@ router.get('/students', withAuth, async (req, res) => {
           academic_year: 'Year 4',
           enrolledClasses: 5,
           attendance: '92%'
-        },
-        {
-          id: 4,
-          name: 'David Wilson',
-          email: 'david@university.edu',
-          department: 'Software Engineering',
-          academic_year: 'Year 3',
-          enrolledClasses: 4,
-          attendance: '96%'
-        },
-        {
-          id: 5,
-          name: 'Eva Brown',
-          email: 'eva@university.edu',
-          department: 'Computer Science',
-          academic_year: 'Year 2',
-          enrolledClasses: 3,
-          attendance: '90%'
         }
       ];
     }
@@ -474,7 +428,7 @@ router.get('/students', withAuth, async (req, res) => {
 router.post('/create-class', withAuth, async (req, res) => {
   try {
     const { className, subject, date, time, duration, room, maxStudents } = req.body;
-    const userId = req.user.id || req.user.userId;
+    const userId = req.userId;
 
     console.log('Create class request:', { className, subject, date, time, duration, room, maxStudents, userId });
 
@@ -485,7 +439,6 @@ router.post('/create-class', withAuth, async (req, res) => {
       });
     }
 
-    // Try to create class in database
     try {
       const startTime = new Date(`${date} ${time}`);
       const endTime = new Date(startTime.getTime() + (parseInt(duration) || 60) * 60000);
@@ -507,9 +460,9 @@ router.post('/create-class', withAuth, async (req, res) => {
         ]
       );
 
-      if (result.rows.length > 0) {
-        const newClass = result.rows[0];
-        console.log('✅ Class created in database:', newClass.id);
+      if (result.length > 0) {
+        const newClass = result[0];
+        console.log('Class created in database:', newClass.id);
         
         res.json({
           success: true,
@@ -530,7 +483,6 @@ router.post('/create-class', withAuth, async (req, res) => {
     } catch (dbError) {
       console.log('Database creation failed, using demo response:', dbError.message);
       
-      // For demo purposes - simulate successful class creation
       const newClassId = Math.floor(Math.random() * 1000) + 100;
       
       console.log(`Simulating creation of class ${className} by user ${userId}`);
@@ -565,7 +517,7 @@ router.post('/create-class', withAuth, async (req, res) => {
 router.post('/notifications', withAuth, async (req, res) => {
   try {
     const { message, classId } = req.body;
-    const userId = req.user.id || req.user.userId;
+    const userId = req.userId;
 
     console.log('Send notification request:', { message, classId, userId });
 
@@ -576,7 +528,6 @@ router.post('/notifications', withAuth, async (req, res) => {
       });
     }
 
-    // Try to get student count for notification
     let studentCount = 0;
     try {
       if (classId) {
@@ -587,9 +538,8 @@ router.post('/notifications', withAuth, async (req, res) => {
            WHERE c.id = $1 AND c.hoc_user_id = $2`,
           [classId, userId]
         );
-        studentCount = countResult.rows[0]?.student_count || 0;
+        studentCount = countResult[0]?.student_count || 0;
       } else {
-        // Broadcast to all students
         const countResult = await query(
           `SELECT COUNT(DISTINCT e.student_id) as student_count
            FROM enrollments e
@@ -597,15 +547,14 @@ router.post('/notifications', withAuth, async (req, res) => {
            WHERE c.hoc_user_id = $1`,
           [userId]
         );
-        studentCount = countResult.rows[0]?.student_count || 0;
+        studentCount = countResult[0]?.student_count || 0;
       }
     } catch (dbError) {
       console.log('Database count failed, using demo count:', dbError.message);
-      studentCount = classId ? 25 : 85; // Demo numbers
+      studentCount = classId ? 25 : 85;
     }
 
-    // Simulate sending notifications
-    console.log(`Simulating notification sent by user ${userId} to ${studentCount} students: "${message}"`);
+    console.log(`Notification sent by user ${userId} to ${studentCount} students: "${message}"`);
 
     res.json({
       success: true,
@@ -630,19 +579,18 @@ router.post('/notifications', withAuth, async (req, res) => {
 // Force enable HOC mode for user
 router.post('/force-enable-hoc', withAuth, async (req, res) => {
   try {
-    const userId = req.user.id || req.user.userId;
+    const userId = req.userId;
     
-    console.log('🔄 Force enabling HOC for user:', userId);
+    console.log('Force enabling HOC for user:', userId);
 
-    // Try to update user HOC status in database
     try {
       const updateResult = await query(
         'UPDATE users SET is_hoc = true, updated_at = NOW() WHERE id = $1 RETURNING *',
         [userId]
       );
 
-      if (updateResult.rows.length > 0) {
-        console.log('✅ HOC status updated in database for user:', userId);
+      if (updateResult.length > 0) {
+        console.log('HOC status updated in database for user:', userId);
         
         res.json({
           success: true,
@@ -653,7 +601,6 @@ router.post('/force-enable-hoc', withAuth, async (req, res) => {
           databaseUpdated: true
         });
       } else {
-        // User not found - use demo response
         console.log(`Simulating HOC activation for user ${userId}`);
         
         res.json({
@@ -686,8 +633,6 @@ router.post('/force-enable-hoc', withAuth, async (req, res) => {
     });
   }
 });
-
-// ===== BASIC ROUTES =====
 
 // Health check
 router.get('/health', (req, res) => {

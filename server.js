@@ -8,6 +8,8 @@ import homepageRoutes from './routes/homepage.js';
 import hocRoutes from './routes/HOC.js'; // Make sure this file exists
 
 import { initializeDatabase } from './db.js';
+import notificationsRoutes from './routes/notifications.js';
+
 
 // Load environment variable
 dotenv.config();
@@ -58,6 +60,10 @@ app.get('/', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/home', homepageRoutes);
 app.use('/api/hoc', hocRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/home', homepageRoutes);
+app.use('/api/hoc', hocRoutes);
+app.use('/api/notifications', notificationsRoutes);  // ADD THIS
 
 // 404 handler for undefined API routes
 app.use('/api/*', (req, res) => {

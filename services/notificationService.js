@@ -1,70 +1,104 @@
-// backend/services/notificationService.js
-const Expo = require('expo-server-sdk');
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-class NotificationService {
-  constructor() {
-    this.expo = new Expo();
-  }
+const API_BASE_URL = 'https://synapes-backend.onrender.com';
 
-  async sendPushNotification(pushToken, message, data = {}) {
-    try {
-      if (!Expo.isExpoPushToken(pushToken)) {
-        console.error(`Invalid Expo push token: ${pushToken}`);
-        return false;
-      }
+// Configure notification handler
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
 
-      const messages = [{
-        to: pushToken,
-        sound: 'default',
-        title: message.title || 'Synapse App',
-        body: message.body,
-        data: data
-      }];
-
-      const chunks = this.expo.chunkPushNotifications(messages);
-      const tickets = [];
-
-      for (let chunk of chunks) {
-        try {
-          let ticketChunk = await this.expo.sendPushNotificationsAsync(chunk);
-          tickets.push(...ticketChunk);
-        } catch (error) {
-          console.error('Error sending notification chunk:', error);
-        }
-      }
-
-      return true;
-    } catch (error) {
-      console.error('Error in sendPushNotification:', error);
-      return false;
-    }
-  }
-
-  async sendBulkNotifications(pushTokens, message, data = {}) {
-    const validTokens = pushTokens.filter(token => Expo.isExpoPushToken(token));
+export const registerForPushNotificationsAsync = async () => {
+  let token;
+  
+  if (Device.isDevice) {
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
     
-    const messages = validTokens.map(token => ({
-      to: token,
-      sound: 'default',
-      title: message.title || 'Synapse App',
-      body: message.body,
-      data: data
-    }));
-
-    const chunks = this.expo.chunkPushNotifications(messages);
-    const tickets = [];
-
-    for (let chunk of chunks) {
-      try {
-        let ticketChunk = await this.expo.sendPushNotificationsAsync(chunk);
-        tickets.push(...ticketChunk);
-      } catch (error) {
-        console.error('Error sending notification chunk:', error);
-      }
+    if (existingStatus !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
     }
-
-    return tickets;
+    
+    if (finalStatus !== 'granted') {
+      console.warn('Failed to get push token for push notification!');
+      return null;
+    }
+    
+    token = (await Notifications.getExpoPushTokenAsync()).data;
+    console.log('Expo Push Token:', token);
+  } else {
+    console.warn('Must use physical device for Push Notifications');
   }
-}
 
-module.exports = new NotificationService();
+  return token;
+};
+
+export const registerTokenWithBackend = async (token) => {
+  try {
+    const userToken = await AsyncStorage.getItem('userToken');
+    const userId = await AsyncStorage.getItem('userId');
+
+    if (!userToken || !userId) return;
+
+    const response = await fetch(`${API_BASE_URL}/api/notifications/register-token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${userToken}`,
+      },
+      body: JSON.stringify({
+        userId: userId,
+        pushToken: token
+      }),
+    });
+
+    const result = await response.json();
+    if (result.success) {
+      console.log('Push token registered successfully with backend');
+    }
+  } catch (error) {
+    console.error('Error registering push token with backend:', error);
+  }
+};
+
+export const sendLocalNotification = async (title, body, data = {}) => {
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        data,
+        sound: 'default',
+      },
+      trigger: null,
+    });
+  } catch (error) {
+    console.error('Error sending local notification:', error);
+  }
+};
+
+export const setupNotificationListeners = () => {
+  const notificationListener = Notifications.addNotificationReceivedListener(notification => {
+    console.log('Notification received:', notification);
+  });
+
+  const responseListener = Notifications.addNotificationResponseReceivedListener(response => {
+    console.log('Notification response:', response);
+    // Handle navigation based on notification data
+    const { data } = response.notification.request.content;
+    if (data?.type === 'class_notification') {
+      console.log('Navigate to class:', data.classId);
+    }
+  });
+
+  return () => {
+    Notifications.removeNotificationSubscription(notificationListener);
+    Notifications.removeNotificationSubscription(responseListener);
+  };
+};

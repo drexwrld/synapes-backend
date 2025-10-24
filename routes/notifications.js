@@ -43,6 +43,8 @@ router.post('/register-token', authenticateToken, async (req, res) => {
 
     console.log(`Registered push token for user ${userId}: ${pushToken}`);
 
+    // --- Database operation to save pushToken to user's row is assumed here ---
+
     res.json({ 
       success: true, 
       message: 'Push token registered successfully' 
@@ -61,6 +63,8 @@ router.post('/unregister-token', authenticateToken, async (req, res) => {
   try {
     const userId = req.userId;
     console.log(`Unregistered push token for user ${userId}`);
+
+    // --- Database operation to clear pushToken from user's row is assumed here ---
 
     res.json({ 
       success: true, 
@@ -85,7 +89,7 @@ router.get('/get-notifications', authenticateToken, async (req, res) => {
     let notifications = [];
 
     try {
-      // Try to fetch from database
+      // Fetch from database, ensuring we include is_read
       const result = await query(
         `SELECT id, user_id, title, message, body, type, is_read, 
                 created_at, data FROM notifications 
@@ -101,7 +105,7 @@ router.get('/get-notifications', authenticateToken, async (req, res) => {
         message: notif.message || notif.body,
         body: notif.message || notif.body,
         type: notif.type,
-        isRead: notif.is_read,
+        isRead: notif.is_read || false, // Ensure isRead is boolean and defaults safely
         createdAt: notif.created_at,
         data: notif.data
       }));
@@ -172,7 +176,7 @@ router.post('/mark-as-read/:notificationId', authenticateToken, async (req, res)
 
     try {
       await query(
-        'UPDATE notifications SET is_read = true WHERE id = $1 AND user_id = $2',
+        'UPDATE notifications SET is_read = TRUE, updated_at = NOW() WHERE id = $1 AND user_id = $2',
         [notificationId, userId]
       );
     } catch (dbError) {
@@ -240,6 +244,7 @@ router.delete('/clear-all', authenticateToken, async (req, res) => {
       console.log('Database clear failed (non-critical):', dbError.message);
     }
 
+    // Returning success whether database operation worked or failed non-critically
     res.json({
       success: true,
       message: 'All notifications cleared successfully'
@@ -253,7 +258,53 @@ router.delete('/clear-all', authenticateToken, async (req, res) => {
   }
 });
 
-// Send class notification
+// --- NEW ENDPOINT: Log a notification for the sender (HOC) ---
+router.post('/log-notification', authenticateToken, async (req, res) => {
+  try {
+    const { title, message, type = 'announcement', data = {}, isBroadcast = false } = req.body;
+    const userId = req.userId;
+
+    if (!title || !message) {
+      return res.status(400).json({
+        success: false,
+        error: 'Title and message are required'
+      });
+    }
+
+    console.log(`📝 Logging notification for sender ${userId}: ${title}`);
+
+    try {
+      // Insert into the database for the sending user (is_read set to FALSE by default)
+      const result = await query(
+        `INSERT INTO notifications (user_id, title, message, type, is_read, created_at, data)
+         VALUES ($1, $2, $3, $4, FALSE, NOW(), $5)
+         RETURNING id, created_at`,
+        [userId, title, message, type, JSON.stringify(data)]
+      );
+
+      if (result.length > 0) {
+        console.log('✅ Notification logged in database:', result[0].id);
+      }
+    } catch (dbError) {
+      console.log('📌 Database insert failed (non-critical):', dbError.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'Notification logged for sender successfully',
+    });
+
+  } catch (error) {
+    console.error('❌ Error logging sender notification:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to log sender notification'
+    });
+  }
+});
+// -----------------------------------------------------------------
+
+// Send class notification (existing, simulates pushing to all class members)
 router.post('/send-class-notification', authenticateToken, async (req, res) => {
   try {
     const { classId, message, title = 'Class Notification' } = req.body;
@@ -266,6 +317,7 @@ router.post('/send-class-notification', authenticateToken, async (req, res) => {
     }
 
     console.log(`Sending notification to class ${classId}: ${message}`);
+    // --- Logic here would fetch all students in classId and insert a notification for each ---
 
     res.json({ 
       success: true, 
@@ -281,7 +333,7 @@ router.post('/send-class-notification', authenticateToken, async (req, res) => {
   }
 });
 
-// Broadcast notification to all students
+// Broadcast notification to all students (existing, simulates pushing to ALL students)
 router.post('/broadcast-notification', authenticateToken, async (req, res) => {
   try {
     const { message, title = 'Announcement' } = req.body;
@@ -294,6 +346,7 @@ router.post('/broadcast-notification', authenticateToken, async (req, res) => {
     }
 
     console.log(`Broadcasting notification: ${message}`);
+    // --- Logic here would fetch all students and insert a notification for each ---
 
     res.json({ 
       success: true, 

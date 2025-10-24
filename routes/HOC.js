@@ -67,15 +67,13 @@ router.get('/my-classes', async (req, res) => {
     res.json({ success: true, data: result });
     
   } catch (error) {
+    // MODIFICATION: Removed the mock data fallback.
+    // Now, if the query fails, it will send the real error to the frontend.
     console.error('Error fetching HOC classes:', error.message);
-    // Sending mock data as a fallback, consistent with your other files.
-    // WARNING: This is bad practice and hides real errors.
-    res.json({
-      success: true,
-      data: [
-        { id: 101, class_name: 'Mock: Advanced CS', subject: 'CS401', start_time: new Date().toISOString(), location: 'Room 101', status: 'scheduled', enrolled_students: 25, max_students: 30, hoc_user_id: req.userId },
-        { id: 102, class_name: 'Mock: Web Dev', subject: 'CS305', start_time: new Date(Date.now() - 86400000).toISOString(), location: 'Lab 3B', status: 'completed', enrolled_students: 18, max_students: 20, hoc_user_id: req.userId }
-      ]
+    res.status(500).json({ 
+      success: false, 
+      error: 'Error fetching HOC classes',
+      details: error.message 
     });
   }
 });
@@ -103,14 +101,12 @@ router.get('/students', async (req, res) => {
     res.json({ success: true, data: result });
     
   } catch (error) {
+    // MODIFICATION: Removed the mock data fallback.
     console.error('Error fetching HOC students:', error.message);
-    // Fallback mock data
-    res.json({
-      success: true,
-      data: [
-        { id: 201, name: 'Mock Student Alice', email: 'alice@school.com', department: 'Computer Science', academic_year: 'Year 3' },
-        { id: 202, name: 'Mock Student Bob', email: 'bob@school.com', department: 'Computer Science', academic_year: 'Year 3' }
-      ]
+    res.status(500).json({ 
+      success: false, 
+      error: 'Error fetching HOC students',
+      details: error.message 
     });
   }
 });
@@ -285,3 +281,4 @@ router.post('/force-enable-hoc', async (req, res) => {
 
 
 export default router;
+

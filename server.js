@@ -60,9 +60,6 @@ app.get('/', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/home', homepageRoutes);
 app.use('/api/hoc', hocRoutes);
-app.use('/api/auth', authRoutes);
-app.use('/api/home', homepageRoutes);
-app.use('/api/hoc', hocRoutes);
 app.use('/api/notifications', notificationsRoutes);  // ADD THIS
 
 // 404 handler for undefined API routes

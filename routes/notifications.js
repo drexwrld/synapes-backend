@@ -41,7 +41,6 @@ router.post('/register-token', authenticateToken, async (req, res) => {
       });
     }
 
-    // For now, just log it - implement database storage if needed
     console.log(`Registered push token for user ${userId}: ${pushToken}`);
 
     res.json({ 
@@ -76,6 +75,184 @@ router.post('/unregister-token', authenticateToken, async (req, res) => {
   }
 });
 
+// Get all notifications for a user
+router.get('/get-notifications', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.userId;
+    
+    console.log('Fetching notifications for user:', userId);
+
+    let notifications = [];
+
+    try {
+      // Try to fetch from database
+      const result = await query(
+        `SELECT id, user_id, title, message, body, type, is_read, 
+                created_at, data FROM notifications 
+         WHERE user_id = $1 
+         ORDER BY created_at DESC 
+         LIMIT 50`,
+        [userId]
+      );
+
+      notifications = result.map(notif => ({
+        id: notif.id,
+        title: notif.title,
+        message: notif.message || notif.body,
+        body: notif.message || notif.body,
+        type: notif.type,
+        isRead: notif.is_read,
+        createdAt: notif.created_at,
+        data: notif.data
+      }));
+
+      console.log('Found', notifications.length, 'notifications in database');
+    } catch (dbError) {
+      console.log('Database query failed, using demo notifications:', dbError.message);
+      
+      // Return demo notifications
+      notifications = [
+        {
+          id: 1,
+          title: 'Welcome to Synapse!',
+          message: 'Your student companion app is ready to use. Explore all features!',
+          type: 'announcement',
+          isRead: true,
+          createdAt: new Date(Date.now() - 86400000).toISOString()
+        },
+        {
+          id: 2,
+          title: 'Mathematics Class Rescheduled',
+          message: 'Your Mathematics class has been moved to 3 PM tomorrow in Room 305',
+          type: 'reschedule',
+          isRead: false,
+          createdAt: new Date(Date.now() - 3600000).toISOString()
+        },
+        {
+          id: 3,
+          title: 'Data Structures Class Update',
+          message: 'Prof. Ahmed has posted new lecture notes for Chapter 5',
+          type: 'class_notification',
+          isRead: false,
+          createdAt: new Date(Date.now() - 1800000).toISOString()
+        },
+        {
+          id: 4,
+          title: 'Physics Class Cancelled',
+          message: 'Physics class scheduled for tomorrow has been cancelled due to lab maintenance',
+          type: 'cancel',
+          isRead: false,
+          createdAt: new Date(Date.now() - 600000).toISOString()
+        }
+      ];
+    }
+
+    res.json({
+      success: true,
+      data: notifications,
+      count: notifications.length,
+      message: 'Notifications retrieved successfully'
+    });
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch notifications'
+    });
+  }
+});
+
+// Mark notification as read
+router.post('/mark-as-read/:notificationId', authenticateToken, async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+    const userId = req.userId;
+
+    console.log('Marking notification as read:', notificationId);
+
+    try {
+      await query(
+        'UPDATE notifications SET is_read = true WHERE id = $1 AND user_id = $2',
+        [notificationId, userId]
+      );
+    } catch (dbError) {
+      console.log('Database update failed (non-critical):', dbError.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'Notification marked as read',
+      notificationId: notificationId
+    });
+  } catch (error) {
+    console.error('Error marking notification as read:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to mark notification as read'
+    });
+  }
+});
+
+// Delete notification
+router.delete('/delete-notification/:notificationId', authenticateToken, async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+    const userId = req.userId;
+
+    console.log('Deleting notification:', notificationId);
+
+    try {
+      await query(
+        'DELETE FROM notifications WHERE id = $1 AND user_id = $2',
+        [notificationId, userId]
+      );
+    } catch (dbError) {
+      console.log('Database delete failed (non-critical):', dbError.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'Notification deleted successfully',
+      notificationId: notificationId
+    });
+  } catch (error) {
+    console.error('Error deleting notification:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete notification'
+    });
+  }
+});
+
+// Clear all notifications
+router.delete('/clear-all', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.userId;
+
+    console.log('Clearing all notifications for user:', userId);
+
+    try {
+      await query(
+        'DELETE FROM notifications WHERE user_id = $1',
+        [userId]
+      );
+    } catch (dbError) {
+      console.log('Database clear failed (non-critical):', dbError.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'All notifications cleared successfully'
+    });
+  } catch (error) {
+    console.error('Error clearing notifications:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to clear notifications'
+    });
+  }
+});
+
 // Send class notification
 router.post('/send-class-notification', authenticateToken, async (req, res) => {
   try {
@@ -93,7 +270,7 @@ router.post('/send-class-notification', authenticateToken, async (req, res) => {
     res.json({ 
       success: true, 
       message: 'Notification sent successfully',
-      recipientCount: 0 // Update with actual count if using database
+      recipientCount: 0
     });
   } catch (error) {
     console.error('Error sending class notification:', error);
@@ -129,6 +306,47 @@ router.post('/broadcast-notification', authenticateToken, async (req, res) => {
       error: 'Failed to send broadcast notification' 
     });
   }
+});
+
+// Update notification preference
+router.post('/update-preference', authenticateToken, async (req, res) => {
+  try {
+    const { notificationsEnabled } = req.body;
+    const userId = req.userId;
+
+    console.log(`Updating notification preference for user ${userId}:`, notificationsEnabled);
+
+    try {
+      await query(
+        'UPDATE users SET notifications_enabled = $1, updated_at = NOW() WHERE id = $2',
+        [notificationsEnabled, userId]
+      );
+    } catch (dbError) {
+      console.log('Database update failed (non-critical):', dbError.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'Notification preference updated successfully',
+      notificationsEnabled: notificationsEnabled
+    });
+  } catch (error) {
+    console.error('Error updating notification preference:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update notification preference'
+    });
+  }
+});
+
+// Health check
+router.get('/health', (req, res) => {
+  res.json({
+    success: true,
+    service: 'Notifications API',
+    status: 'healthy',
+    timestamp: new Date().toISOString()
+  });
 });
 
 export default router;

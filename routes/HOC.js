@@ -124,8 +124,26 @@ router.post('/create-class', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Class name, date, time, and room are required' });
     }
     
-    // Combine date and time into a valid timestamp
-    const startTime = `${date} ${time}`; 
+    // --- START FIX ---
+    // Combine date and time strings from the text inputs
+    const combinedString = `${date} ${time}`; 
+    
+    // Attempt to convert this string into a valid Date object
+    const startTimeObject = new Date(combinedString);
+
+    // Check if the date is valid
+    if (isNaN(startTimeObject.getTime())) {
+      // If the date is invalid (e.g., user typed "hello"), return a 400 error
+      console.error(`Invalid date format received: ${combinedString}`);
+      return res.status(400).json({ 
+        success: false, 
+        error: `Invalid date/time format. Please use YYYY-MM-DD and HH:MM.` 
+      });
+    }
+    
+    // Convert the valid Date object into a format PostgreSQL understands (ISO 8601)
+    const startTime = startTimeObject.toISOString();
+    // --- END FIX ---
     
     console.log(`Creating new class: ${className} for HOC ${hocUserId}`);
 
@@ -281,4 +299,3 @@ router.post('/force-enable-hoc', async (req, res) => {
 
 
 export default router;
-

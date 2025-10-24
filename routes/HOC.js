@@ -1,668 +1,330 @@
 import express from 'express';
-import { verifyToken } from '../utils/jwt.js';
 import { query } from '../db.js';
+import { verifyToken } from '../utils/jwt.js';
 
 const router = express.Router();
 
-// Fixed Authentication middleware - standardized token extraction
-const withAuth = (req, res, next) => {
+// Middleware to verify JWT token
+const authenticateToken = (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
     
     if (!token) {
-      return res.status(401).json({
-        success: false,
-        error: 'Access denied. No token provided.'
+      return res.status(401).json({ 
+        success: false, 
+        error: 'Access token required' 
       });
     }
 
-    console.log('Verifying token...');
+    console.log('🔐 Verifying token...');
     const decoded = verifyToken(token);
-    
-    // Standardized: always use userId
     req.userId = decoded.userId;
-    req.user = decoded;
-    console.log('Token verified for user:', req.userId);
+    console.log('✅ Token verified for user:', req.userId);
     next();
   } catch (error) {
-    console.error('Auth middleware error:', error.message);
-    return res.status(401).json({
-      success: false,
-      error: 'Invalid or expired token.'
+    console.error('❌ Token verification failed:', error.message);
+    return res.status(401).json({ 
+      success: false, 
+      error: 'Invalid or expired token' 
     });
   }
 };
 
-// Enhanced HOC test with proper database checking
-router.get('/test', withAuth, async (req, res) => {
+// Get dashboard data
+router.get('/dashboard', authenticateToken, async (req, res) => {
   try {
     const userId = req.userId;
-    
-    console.log('HOC Test - Checking user:', userId);
+    console.log('📊 Fetching dashboard for user ID:', userId);
 
+    // 1. Get user info
+    console.log('👤 Querying user data...');
+    const userResult = await query(
+      'SELECT id, full_name, email, department, academic_year FROM users WHERE id = $1',
+      [userId]
+    );
+    
+    if (userResult.length === 0) {
+      console.log('❌ User not found in database');
+      return res.status(404).json({ 
+        success: false, 
+        error: 'User not found' 
+      });
+    }
+
+    const user = userResult[0];
+    console.log('✅ User found:', user.full_name);
+
+    // 2. Check if user is HOC
+    console.log('👨‍🏫 Checking HOC status...');
     let isHOC = false;
-    let hocClassCount = 0;
-    let databaseWorking = false;
-
     try {
-      // First, check if users table has is_hoc column
-      const tableCheck = await query(`
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name = 'users' AND column_name = 'is_hoc'
-      `);
-
-      if (tableCheck.length > 0) {
-        // Column exists, check HOC status
-        const userCheck = await query(
-          'SELECT is_hoc FROM users WHERE id = $1',
-          [userId]
-        );
-
-        if (userCheck.length > 0) {
-          isHOC = userCheck[0].is_hoc === true;
-          databaseWorking = true;
-          console.log('Database check - User HOC status:', isHOC);
-        }
-      }
-
-      // Count HOC classes regardless of user HOC status
-      const classCount = await query(
-        'SELECT COUNT(*) as count FROM classes WHERE hoc_user_id = $1',
+      const hocResult = await query(
+        'SELECT COUNT(*) as hoc_count FROM classes WHERE hoc_user_id = $1',
         [userId]
       );
-
-      if (classCount.length > 0) {
-        hocClassCount = parseInt(classCount[0].count) || 0;
-        // If user has HOC classes, they are effectively HOC
-        if (hocClassCount > 0) {
-          isHOC = true;
-        }
-      }
-
-    } catch (dbError) {
-      console.log('Database check failed:', dbError.message);
-      isHOC = true;
-      hocClassCount = 3;
+      isHOC = hocResult[0]?.hoc_count > 0;
+      console.log('🎯 HOC status:', isHOC);
+    } catch (hocError) {
+      console.log('📌 Classes table might not exist yet, defaulting to non-HOC');
+      isHOC = false;
     }
 
-    res.json({
+    // 3. Mock data (since classes table might not exist yet)
+    console.log('📋 Generating mock data...');
+    const nextClass = {
+      id: 1,
+      class_name: 'Data Structures',
+      instructor: 'Prof. Ahmed',
+      start_time: new Date().toISOString(),
+      location: 'Lab 302',
+      status: 'on'
+    };
+
+    const todaySchedule = [
+      { id: 1, time: '09:00 AM', class: 'Mathematics', status: 'completed' },
+      { id: 2, time: '10:30 AM', class: 'Data Structures', status: 'ongoing' },
+      { id: 3, time: '01:00 PM', class: 'Web Development', status: 'upcoming' },
+    ];
+
+    const recentUpdates = [
+      { 
+        id: 1, 
+        title: 'Welcome to Synapse!', 
+        desc: 'Your student companion app is ready', 
+        time: 'Just now', 
+        type: 'info' 
+      },
+      { 
+        id: 2, 
+        title: 'Schedule Changed', 
+        desc: 'Physics class moved to 3 PM', 
+        time: '2h ago', 
+        type: 'reschedule' 
+      },
+    ];
+
+    // 4. Format response
+    console.log('📦 Sending dashboard response...');
+    const responseData = {
       success: true,
-      message: 'HOC system check completed',
-      userId: userId,
-      isHOC: isHOC,
-      hocClassCount: hocClassCount,
-      databaseStatus: databaseWorking ? 'Connected' : 'Using demo data',
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('HOC test error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to check HOC status: ' + error.message
-    });
-  }
-});
-
-// Get HOC's classes
-router.get('/my-classes', withAuth, async (req, res) => {
-  try {
-    const userId = req.userId;
-    
-    console.log('Fetching classes for HOC user:', userId);
-
-    let classes = [];
-    let usingDemoData = true;
-
-    // Try to get real classes from database
-    try {
-      const result = await query(`
-        SELECT 
-          c.id, 
-          c.class_name, 
-          c.subject,
-          c.start_time,
-          c.end_time,
-          c.location,
-          c.status,
-          c.instructor,
-          c.max_students,
-          c.created_at,
-          COUNT(e.student_id) as enrolled_students
-        FROM classes c
-        LEFT JOIN enrollments e ON c.id = e.class_id
-        WHERE c.hoc_user_id = $1
-        GROUP BY c.id
-        ORDER BY c.start_time ASC
-      `, [userId]);
-
-      if (result && result.length > 0) {
-        classes = result;
-        usingDemoData = false;
-        console.log('Found', classes.length, 'real classes in database');
-      }
-    } catch (dbError) {
-      console.log('Database query failed, using demo data:', dbError.message);
-    }
-
-    // If no real classes found, use demo data
-    if (classes.length === 0) {
-      classes = [
-        {
-          id: 1,
-          class_name: 'Advanced Computer Science',
-          subject: 'CS401',
-          start_time: new Date(Date.now() + 86400000).toISOString(),
-          end_time: new Date(Date.now() + 86400000 + 7200000).toISOString(),
-          location: 'Room 301',
-          status: 'scheduled',
-          instructor: 'Dr. Smith',
-          max_students: 30,
-          enrolled_students: 25,
-          created_at: new Date().toISOString()
+      data: {
+        user: {
+          id: user.id,
+          fullName: user.full_name,
+          email: user.email,
+          department: user.department,
+          academicYear: user.academic_year,
         },
-        {
-          id: 2,
-          class_name: 'Database Systems',
-          subject: 'CS302',
-          start_time: new Date(Date.now() + 172800000).toISOString(),
-          end_time: new Date(Date.now() + 172800000 + 7200000).toISOString(),
-          location: 'Lab B',
-          status: 'scheduled',
-          instructor: 'Prof. Johnson',
-          max_students: 25,
-          enrolled_students: 22,
-          created_at: new Date().toISOString()
-        }
-      ];
-    }
-
-    res.json({
-      success: true,
-      data: classes,
-      count: classes.length,
-      usingDemoData: usingDemoData,
-      message: usingDemoData ? 'Using demo data - setup database for real data' : 'Real class data loaded'
-    });
-  } catch (error) {
-    console.error('Error fetching HOC classes:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch classes: ' + error.message
-    });
-  }
-});
-
-// Cancel class
-router.post('/cancel-class', withAuth, async (req, res) => {
-  try {
-    const { classId, reason } = req.body;
-    const userId = req.userId;
-
-    console.log('Cancel class request:', { classId, reason, userId });
-
-    if (!classId || !reason) {
-      return res.status(400).json({
-        success: false,
-        error: 'Class ID and reason are required'
-      });
-    }
-
-    try {
-      const updateResult = await query(
-        'UPDATE classes SET status = $1, updated_at = NOW() WHERE id = $2 AND hoc_user_id = $3 RETURNING *',
-        ['cancelled', classId, userId]
-      );
-
-      if (updateResult.length > 0) {
-        console.log('Class cancelled in database:', classId);
-        
-        res.json({
-          success: true,
-          message: 'Class cancelled successfully',
-          classId: classId,
-          cancelledBy: userId,
-          reason: reason,
-          timestamp: new Date().toISOString(),
-          databaseUpdated: true
-        });
-      } else {
-        console.log(`Simulating cancellation of class ${classId} by user ${userId}`);
-        
-        res.json({
-          success: true,
-          message: 'Class cancelled successfully',
-          classId: classId,
-          cancelledBy: userId,
-          reason: reason,
-          timestamp: new Date().toISOString(),
-          note: 'Demo mode - class not found in database'
-        });
+        nextClass: nextClass,
+        todaySchedule: todaySchedule,
+        recentUpdates: recentUpdates,
+        isHOC: isHOC,
       }
-    } catch (dbError) {
-      console.log('Database update failed, using demo response:', dbError.message);
-      
-      res.json({
-        success: true,
-        message: 'Class cancelled successfully',
-        classId: classId,
-        cancelledBy: userId,
-        reason: reason,
-        timestamp: new Date().toISOString(),
-        note: 'Demo mode - database update failed'
-      });
-    }
+    };
+
+    console.log('✅ Dashboard data sent successfully');
+    res.json(responseData);
 
   } catch (error) {
-    console.error('Error cancelling class:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to cancel class: ' + error.message
-    });
-  }
-});
-
-// Reschedule class
-router.post('/reschedule-class', withAuth, async (req, res) => {
-  try {
-    const { classId, newTime, newRoom, reason } = req.body;
-    const userId = req.userId;
-
-    console.log('Reschedule class request:', { classId, newTime, newRoom, reason, userId });
-
-    if (!classId || !newTime || !newRoom) {
-      return res.status(400).json({
-        success: false,
-        error: 'Class ID, new time, and new room are required'
-      });
-    }
-
-    try {
-      const updateResult = await query(
-        'UPDATE classes SET start_time = $1, location = $2, status = $3, updated_at = NOW() WHERE id = $4 AND hoc_user_id = $5 RETURNING *',
-        [newTime, newRoom, 'rescheduled', classId, userId]
-      );
-
-      if (updateResult.length > 0) {
-        console.log('Class rescheduled in database:', classId);
-        
-        res.json({
-          success: true,
-          message: 'Class rescheduled successfully',
-          classId: classId,
-          rescheduledBy: userId,
-          newTime: newTime,
-          newRoom: newRoom,
-          reason: reason,
-          timestamp: new Date().toISOString(),
-          databaseUpdated: true
-        });
-      } else {
-        console.log(`Simulating reschedule of class ${classId} by user ${userId}`);
-        
-        res.json({
-          success: true,
-          message: 'Class rescheduled successfully',
-          classId: classId,
-          rescheduledBy: userId,
-          newTime: newTime,
-          newRoom: newRoom,
-          reason: reason,
-          timestamp: new Date().toISOString(),
-          note: 'Demo mode - class not found in database'
-        });
-      }
-    } catch (dbError) {
-      console.log('Database update failed, using demo response:', dbError.message);
-      
-      res.json({
-        success: true,
-        message: 'Class rescheduled successfully',
-        classId: classId,
-        rescheduledBy: userId,
-        newTime: newTime,
-        newRoom: newRoom,
-        reason: reason,
-        timestamp: new Date().toISOString(),
-        note: 'Demo mode - database update failed'
-      });
-    }
-
-  } catch (error) {
-    console.error('Error rescheduling class:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to reschedule class: ' + error.message
-    });
-  }
-});
-
-// Get HOC students
-router.get('/students', withAuth, async (req, res) => {
-  try {
-    const userId = req.userId;
+    console.error('💥 DASHBOARD ERROR:', error);
+    console.error('Error stack:', error.stack);
     
-    console.log('Fetching students for HOC user:', userId);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+});
 
-    let students = [];
-    let usingDemoData = true;
+// Get recent updates (from HOC actions and settings changes)
+router.get('/recent-updates', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.userId;
+    console.log('📰 Fetching recent updates for user:', userId);
+
+    let updates = [];
 
     try {
+      // Fetch from activities/updates table if it exists
       const result = await query(
-        `SELECT DISTINCT 
-          u.id, 
-          u.full_name as name, 
-          u.email,
-          u.department,
-          u.academic_year
-         FROM users u
-         INNER JOIN enrollments e ON u.id = e.student_id
-         INNER JOIN classes c ON e.class_id = c.id
-         WHERE c.hoc_user_id = $1
-         ORDER BY u.full_name ASC`,
+        `SELECT id, user_id, title, description, activity_type, source, created_at 
+         FROM user_activities 
+         WHERE user_id = $1 
+         ORDER BY created_at DESC 
+         LIMIT 20`,
         [userId]
       );
 
-      if (result && result.length > 0) {
-        students = result;
-        usingDemoData = false;
-        console.log('Found', students.length, 'real students in database');
-      }
-    } catch (dbError) {
-      console.log('Database query failed, using demo students:', dbError.message);
-    }
+      updates = result.map(activity => ({
+        id: activity.id,
+        title: activity.title,
+        desc: activity.description,
+        time: formatTimeAgo(activity.created_at),
+        type: activity.activity_type,
+        source: activity.source,
+        createdAt: activity.created_at
+      }));
 
-    // Return demo students if no real data found
-    if (students.length === 0) {
-      students = [
+      console.log('✅ Found', updates.length, 'activities in database');
+    } catch (dbError) {
+      console.log('📌 Activities table not found, using demo data:', dbError.message);
+      
+      // Demo data with HOC and Settings updates
+      updates = [
         {
           id: 1,
-          name: 'Alice Johnson',
-          email: 'alice@university.edu',
-          department: 'Computer Science',
-          academic_year: 'Year 3',
-          enrolledClasses: 4,
-          attendance: '95%'
+          title: 'Welcome to Synapse!',
+          desc: 'Your student companion app is ready to use',
+          time: '1d ago',
+          type: 'info',
+          source: 'system',
+          createdAt: new Date(Date.now() - 86400000).toISOString()
         },
         {
           id: 2,
-          name: 'Bob Smith',
-          email: 'bob@university.edu',
-          department: 'Computer Science',
-          academic_year: 'Year 3',
-          enrolledClasses: 3,
-          attendance: '88%'
+          title: 'Notifications Enabled',
+          desc: 'Push notifications have been activated in your settings',
+          time: '2h ago',
+          type: 'info',
+          source: 'settings',
+          createdAt: new Date(Date.now() - 7200000).toISOString()
         },
         {
           id: 3,
-          name: 'Carol Davis',
-          email: 'carol@university.edu',
-          department: 'Computer Science',
-          academic_year: 'Year 4',
-          enrolledClasses: 5,
-          attendance: '92%'
+          title: 'Mathematics Class Rescheduled',
+          desc: 'Your Mathematics class has been moved to 3:00 PM in Room 305',
+          time: '1h ago',
+          type: 'reschedule',
+          source: 'hoc',
+          createdAt: new Date(Date.now() - 3600000).toISOString()
+        },
+        {
+          id: 4,
+          title: 'Physics Class Cancelled',
+          desc: 'Physics class scheduled for tomorrow has been cancelled due to lab maintenance',
+          time: '30m ago',
+          type: 'cancel',
+          source: 'hoc',
+          createdAt: new Date(Date.now() - 1800000).toISOString()
         }
       ];
     }
 
     res.json({
       success: true,
-      data: students,
-      count: students.length,
-      usingDemoData: usingDemoData,
-      message: usingDemoData ? 'Using demo data - setup database for real data' : 'Real student data loaded'
+      data: updates,
+      count: updates.length,
+      message: 'Recent updates retrieved successfully'
     });
 
   } catch (error) {
-    console.error('Error fetching HOC students:', error);
+    console.error('❌ Error fetching recent updates:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch students: ' + error.message
+      error: 'Failed to fetch recent updates',
+      message: error.message
     });
   }
 });
 
-// Create new class
-router.post('/create-class', withAuth, async (req, res) => {
+// Add activity/update (called by HOC when making changes)
+router.post('/log-activity', authenticateToken, async (req, res) => {
   try {
-    const { className, subject, date, time, duration, room, maxStudents } = req.body;
+    const { title, description, activityType, source } = req.body;
     const userId = req.userId;
 
-    console.log('Create class request:', { className, subject, date, time, duration, room, maxStudents, userId });
+    console.log('📝 Logging activity:', { title, activityType, source });
 
-    if (!className || !date || !time || !room) {
+    if (!title || !activityType || !source) {
       return res.status(400).json({
         success: false,
-        error: 'Class name, date, time, and room are required'
+        error: 'Title, activity type, and source are required'
       });
     }
 
     try {
-      const startTime = new Date(`${date} ${time}`);
-      const endTime = new Date(startTime.getTime() + (parseInt(duration) || 60) * 60000);
-
+      // Try to insert into database
       const result = await query(
-        `INSERT INTO classes (
-          class_name, subject, start_time, end_time, location, 
-          max_students, hoc_user_id, status, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW()) RETURNING *`,
-        [
-          className,
-          subject || '',
-          startTime,
-          endTime,
-          room,
-          parseInt(maxStudents) || 30,
-          userId,
-          'scheduled'
-        ]
+        `INSERT INTO user_activities (user_id, title, description, activity_type, source, created_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())
+         RETURNING id, created_at`,
+        [userId, title, description || '', activityType, source]
       );
 
       if (result.length > 0) {
-        const newClass = result[0];
-        console.log('Class created in database:', newClass.id);
-        
-        res.json({
-          success: true,
-          message: 'Class created successfully',
-          classId: newClass.id,
-          className: newClass.class_name,
-          subject: newClass.subject,
-          date: date,
-          time: time,
-          duration: duration,
-          room: newClass.location,
-          maxStudents: newClass.max_students,
-          createdBy: userId,
-          timestamp: new Date().toISOString(),
-          databaseCreated: true
-        });
+        console.log('✅ Activity logged in database:', result[0].id);
       }
     } catch (dbError) {
-      console.log('Database creation failed, using demo response:', dbError.message);
-      
-      const newClassId = Math.floor(Math.random() * 1000) + 100;
-      
-      console.log(`Simulating creation of class ${className} by user ${userId}`);
-
-      res.json({
-        success: true,
-        message: 'Class created successfully',
-        classId: newClassId,
-        className: className,
-        subject: subject,
-        date: date,
-        time: time,
-        duration: duration,
-        room: room,
-        maxStudents: maxStudents,
-        createdBy: userId,
-        timestamp: new Date().toISOString(),
-        note: 'Demo mode - database creation failed'
-      });
+      console.log('📌 Database insert failed (non-critical):', dbError.message);
     }
-
-  } catch (error) {
-    console.error('Error creating class:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to create class: ' + error.message
-    });
-  }
-});
-
-// Send notifications to students
-router.post('/notifications', withAuth, async (req, res) => {
-  try {
-    const { message, classId } = req.body;
-    const userId = req.userId;
-
-    console.log('Send notification request:', { message, classId, userId });
-
-    if (!message) {
-      return res.status(400).json({
-        success: false,
-        error: 'Message is required'
-      });
-    }
-
-    let studentCount = 0;
-    try {
-      if (classId) {
-        const countResult = await query(
-          `SELECT COUNT(DISTINCT e.student_id) as student_count
-           FROM enrollments e
-           INNER JOIN classes c ON e.class_id = c.id
-           WHERE c.id = $1 AND c.hoc_user_id = $2`,
-          [classId, userId]
-        );
-        studentCount = countResult[0]?.student_count || 0;
-      } else {
-        const countResult = await query(
-          `SELECT COUNT(DISTINCT e.student_id) as student_count
-           FROM enrollments e
-           INNER JOIN classes c ON e.class_id = c.id
-           WHERE c.hoc_user_id = $1`,
-          [userId]
-        );
-        studentCount = countResult[0]?.student_count || 0;
-      }
-    } catch (dbError) {
-      console.log('Database count failed, using demo count:', dbError.message);
-      studentCount = classId ? 25 : 85;
-    }
-
-    console.log(`Notification sent by user ${userId} to ${studentCount} students: "${message}"`);
 
     res.json({
       success: true,
-      message: `Notification sent successfully to ${studentCount} students`,
-      notification: message,
-      sentBy: userId,
-      classId: classId,
-      recipients: studentCount,
-      timestamp: new Date().toISOString(),
-      note: studentCount > 0 ? 'Demo mode - no actual notifications were sent' : 'No students found to notify'
+      message: 'Activity logged successfully',
+      activityType: activityType,
+      source: source
     });
 
   } catch (error) {
-    console.error('Error sending notification:', error);
+    console.error('❌ Error logging activity:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to send notification: ' + error.message
+      error: 'Failed to log activity'
     });
   }
 });
 
-// Force enable HOC mode for user
-router.post('/force-enable-hoc', withAuth, async (req, res) => {
+// Test endpoint - no authentication required
+router.get('/test', async (req, res) => {
   try {
-    const userId = req.userId;
+    console.log('🧪 Testing homepage routes...');
     
-    console.log('Force enabling HOC for user:', userId);
-
-    try {
-      const updateResult = await query(
-        'UPDATE users SET is_hoc = true, updated_at = NOW() WHERE id = $1 RETURNING *',
-        [userId]
-      );
-
-      if (updateResult.length > 0) {
-        console.log('HOC status updated in database for user:', userId);
-        
-        res.json({
-          success: true,
-          message: 'HOC privileges activated successfully!',
-          userId: userId,
-          isHOC: true,
-          activatedAt: new Date().toISOString(),
-          databaseUpdated: true
-        });
-      } else {
-        console.log(`Simulating HOC activation for user ${userId}`);
-        
-        res.json({
-          success: true,
-          message: 'HOC privileges activated successfully!',
-          userId: userId,
-          isHOC: true,
-          activatedAt: new Date().toISOString(),
-          note: 'Demo mode - user not found in database'
-        });
-      }
-    } catch (dbError) {
-      console.log('Database update failed, using demo response:', dbError.message);
-      
-      res.json({
-        success: true,
-        message: 'HOC privileges activated successfully!',
-        userId: userId,
-        isHOC: true,
-        activatedAt: new Date().toISOString(),
-        note: 'Demo mode - database update failed'
-      });
-    }
-
+    // Test database connection
+    const testResult = await query('SELECT 1 + 1 AS solution');
+    console.log('✅ Database test passed:', testResult[0].solution);
+    
+    res.json({ 
+      success: true, 
+      message: 'Homepage routes are working',
+      database: 'Connected',
+      timestamp: new Date().toISOString()
+    });
   } catch (error) {
-    console.error('Error enabling HOC:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to enable HOC mode: ' + error.message
+    console.error('❌ Test endpoint error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Test failed: ' + error.message 
     });
   }
 });
 
-// Health check
+// Health check endpoint
 router.get('/health', (req, res) => {
-  res.json({
-    success: true,
-    service: 'HOC Tools API',
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    endpoints: [
-      'GET /api/hoc/test - Test HOC connection',
-      'GET /api/hoc/my-classes - Get HOC classes',
-      'POST /api/hoc/cancel-class - Cancel a class',
-      'POST /api/hoc/reschedule-class - Reschedule a class',
-      'GET /api/hoc/students - Get HOC students',
-      'POST /api/hoc/create-class - Create new class',
-      'POST /api/hoc/notifications - Send notifications',
-      'POST /api/hoc/force-enable-hoc - Activate HOC mode'
-    ]
-  });
-});
-
-// Root route
-router.get('/', (req, res) => {
-  res.json({
-    success: true,
-    message: 'HOC Tools API is working!',
-    version: '1.0.0',
+  res.json({ 
+    success: true, 
+    message: 'Homepage routes are healthy',
     timestamp: new Date().toISOString()
   });
 });
 
-export { withAuth };
+// Helper function to format time ago
+function formatTimeAgo(dateString) {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+export { authenticateToken };
 export default router;

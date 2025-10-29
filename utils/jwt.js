@@ -1,40 +1,38 @@
-import jwt from "jsonwebtoken";
+// utils/jwt.js
+const jwt = require('jsonwebtoken');
+require('dotenv').config(); // Ensure environment variables are accessible
 
-export function createToken(user) {
-  try {
-    if (!process.env.JWT_SECRET) {
-      throw new Error('JWT_SECRET is not defined in environment variables');
+// --- Validate JWT_SECRET ---
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+    console.error('FATAL ERROR: JWT_SECRET environment variable is not defined.');
+    console.error('Please add JWT_SECRET=<your_strong_secret_key> to your .env file');
+    process.exit(1); // Exit if secret is missing - critical for security
+}
+
+// --- Validate JWT_EXPIRES_IN ---
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1d'; // Default to 1 day if not set
+// Optional: Add validation for the expiresIn format if needed
+
+
+/**
+ * Generates a JSON Web Token.
+ * @param {string|number} userId - The ID of the user to include in the payload.
+ * @returns {string} - The generated JWT.
+ */
+const generateToken = (userId) => {
+    if (!userId) {
+        console.error('Error generating token: userId is missing.');
+        throw new Error('User identifier is required to generate a token.'); // Throw error if userId is missing
     }
-    
-    if (!user || !user.id || !user.email) {
-      throw new Error('Invalid user data for token creation');
-    }
-    
     const payload = {
-      userId: user.id,
-      email: user.email,
-      fullName: user.full_name,
+        userId: userId,
+        // You could add other non-sensitive identifiers like role if useful, but keep it minimal
     };
 
-    console.log('🔑 Creating token for user:', user.email);
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "7d" });
-    console.log('✅ Token created successfully');
-    
-    return token;
-  } catch (error) {
-    console.error('❌ JWT Token creation error:', error.message);
-    throw new Error('Failed to create authentication token: ' + error.message);
-  }
-}
+    return jwt.sign(payload, JWT_SECRET, {
+        expiresIn: JWT_EXPIRES_IN,
+    });
+};
 
-export function verifyToken(token) {
-  try {
-    if (!process.env.JWT_SECRET) {
-      throw new Error('JWT_SECRET is not defined');
-    }
-    return jwt.verify(token, process.env.JWT_SECRET);
-  } catch (error) {
-    console.error('❌ JWT verification error:', error.message);
-    throw error;
-  }
-}
+module.exports = { generateToken };

@@ -1,186 +1,105 @@
-import express from "express";
-import { query } from "../db.js";
-import { hashPassword, verifyPassword } from "../utils/hash.js";
-import { createToken } from "../utils/jwt.js";
-
+// routes/auth.js
+const express = require('express');
 const router = express.Router();
+const { pool } = require('../db');
+const { hashPassword, comparePassword } = require('../utils/hash');
+const { generateToken } = require('../utils/jwt');
+const asyncHandler = require('../utils/asyncHandler'); // Import error wrapper
+const { sendSuccess, sendError } = require('../utils/responseHandler'); // Import response helpers
 
-// TEST ENDPOINT - Add this first
-router.get("/test", async (req, res) => {
-  try {
-    console.log('🧪 Testing complete system...');
-    
-    // Test 1: Environment variables
-    console.log('🔑 JWT_SECRET exists:', !!process.env.JWT_SECRET);
-    console.log('🗄️  DATABASE_HOST:', process.env.DATABASE_HOST);
-    
-    // Test 2: Database connection
-    const testResult = await query('SELECT 1 + 1 AS solution');
-    console.log('✅ Database connected, test query result:', testResult[0].solution);
-    
-    // Test 3: Query users table
-    const users = await query('SELECT COUNT(*) as count FROM users');
-    console.log('📊 Users in database:', users[0].count);
-    
-    // Test 4: Check table structure
-    const tableInfo = await query(`
-      SELECT column_name, data_type 
-      FROM information_schema.columns 
-      WHERE table_name = 'users'
-    `);
-    console.log('📋 Users table columns:', tableInfo.map(col => col.column_name));
-    
-    res.json({ 
-      success: true, 
-      message: 'System test passed',
-      usersCount: users[0].count,
-      tableColumns: tableInfo.map(col => col.column_name)
-    });
-    
-  } catch (error) {
-    console.error('❌ System test failed:', error.message);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message,
-      stack: error.stack
-    });
-  }
-});
-
-router.post("/signup", async (req, res) => {
-  try {
-    console.log('📥 Signup request received:', { ...req.body, password: '[HIDDEN]' });
-    
+// POST /api/auth/signup
+router.post('/signup', asyncHandler(async (req, res) => {
     const { fullName, email, password, department, academicYear } = req.body;
 
+    // --- Input Validation ---
     if (!fullName || !email || !password || !department || !academicYear) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "All fields are required." 
-      });
+        return sendError(res, 'Missing required fields: fullName, email, password, department, and academicYear are required.', 400);
+    }
+    // Basic email format check (consider a more robust library like 'validator' for production)
+    if (!/\S+@\S+\.\S+/.test(email)) {
+         return sendError(res, 'Invalid email format.', 400);
+    }
+    if (typeof password !== 'string' || password.length < 6) {
+        return sendError(res, 'Password must be a string of at least 6 characters.', 400);
+    }
+    // Add validation for department/academicYear if they should conform to specific values
+
+    // --- Check for Existing User ---
+    const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]); // Check lowercase email
+    if (existingUser.rows.length > 0) {
+        return sendError(res, 'An account with this email address already exists.', 409); // 409 Conflict
     }
 
-    console.log('🔍 Checking for existing user...');
-    const existing = await query("SELECT id FROM users WHERE email = $1", [email]);
-    if (existing.length > 0) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "Email already registered." 
-      });
-    }
+    // --- Hash Password ---
+    const hashedPassword = await hashPassword(password);
 
-    console.log('🔐 Hashing password...');
-    const password_hash = await hashPassword(password);
-    console.log('✅ Password hashed');
+    // --- Create User ---
+    // Ensure column names match your DB schema exactly (e.g., full_name, password_hash)
+    const insertQuery = `
+        INSERT INTO users (full_name, email, password_hash, department, academic_year, is_hoc, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+        RETURNING id`; // Only return necessary fields, avoid returning hash
+    const values = [
+        fullName,
+        email.toLowerCase(), // Store email in lowercase for consistency
+        hashedPassword,
+        department,
+        academicYear,
+        false // Default new users to not be HOC
+    ];
+    await pool.query(insertQuery, values);
 
-    console.log('💾 Creating user in database...');
-    const result = await query(
-      `INSERT INTO users (full_name, email, password_hash, department, academic_year, created_at) 
-       VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING id`,
-      [fullName, email, password_hash, department, academicYear]
-    );
-    console.log('✅ User created with ID:', result[0].id);
+    // Send success response
+    sendSuccess(res, { message: "Account created successfully. You can now log in." }, 201); // 201 Created
+}));
 
-    const userRows = await query(
-      "SELECT id, full_name, email, department, academic_year, created_at FROM users WHERE id = $1",
-      [result[0].id]
-    );
-
-    const user = userRows[0];
-    console.log('🎫 Creating JWT token...');
-    const token = createToken(user);
-    console.log('✅ Token created');
-
-    res.status(201).json({
-      success: true,
-      message: "Registration successful!",
-      user: {
-        id: user.id,
-        fullName: user.full_name,
-        email: user.email,
-        department: user.department,
-        academicYear: user.academic_year,
-        createdAt: user.created_at
-      },
-      token,
-    });
-  } catch (err) {
-    console.error("❌ Signup error:", err.message);
-    console.error("Stack:", err.stack);
-    res.status(500).json({ 
-      success: false, 
-      error: "Server error during registration: " + err.message
-    });
-  }
-});
-
-router.post("/login", async (req, res) => {
-  try {
-    console.log('🔍 1. Login endpoint hit', { ...req.body, password: '[HIDDEN]' });
-    
+// POST /api/auth/login
+router.post('/login', asyncHandler(async (req, res) => {
     const { email, password } = req.body;
-    console.log('📧 2. Email:', email);
 
+    // --- Input Validation ---
     if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        error: "Email and password are required."
-      });
+        return sendError(res, 'Please provide both email and password.', 400);
     }
 
-    console.log('🔍 3. Querying user...');
-    const rows = await query("SELECT * FROM users WHERE email = $1", [email]);
-    console.log('📊 4. Found users:', rows.length);
+    // --- Find User ---
+    // Ensure column names match your DB schema
+    const userQuery = `
+        SELECT id, email, password_hash, full_name as "fullName", department,
+               academic_year as "academicYear", is_hoc as "isHoc"
+        FROM users
+        WHERE email = $1`;
+    const userResult = await pool.query(userQuery, [email.toLowerCase()]); // Check lowercase email
 
-    if (rows.length === 0) {
-      console.log('❌ 5. No user found with email:', email);
-      return res.status(401).json({ 
-        success: false, 
-        error: "Invalid email or password." 
-      });
+    if (userResult.rows.length === 0) {
+        // Use a generic message for security (don't reveal if email exists)
+        return sendError(res, 'Invalid email or password.', 401); // 401 Unauthorized
     }
 
-    console.log('🔐 6. Verifying password...');
-    const user = rows[0];
-    const valid = await verifyPassword(password, user.password_hash);
-    console.log('✅ 7. Password valid:', valid);
+    const user = userResult.rows[0];
 
-    if (!valid) {
-      console.log('❌ 8. Password verification failed');
-      return res.status(401).json({ 
-        success: false, 
-        error: "Invalid email or password." 
-      });
+    // --- Verify Password ---
+    const isMatch = await comparePassword(password, user.password_hash);
+    if (!isMatch) {
+        return sendError(res, 'Invalid email or password.', 401); // Password mismatch
     }
 
-    console.log('🎫 9. Creating token...');
-    const token = createToken(user);
-    console.log('✅ 10. Token created successfully');
+    // --- Generate Token ---
+    const token = generateToken(user.id); // Payload contains userId
 
-    console.log('🎉 11. Login successful for user:', user.email);
-
-    res.json({
-      success: true,
-      message: "Login successful!",
-      user: {
+    // --- Prepare User Data for Response ---
+    // Exclude sensitive information like password hash
+    const userDataToSend = {
         id: user.id,
-        fullName: user.full_name,
+        fullName: user.fullName,
         email: user.email,
         department: user.department,
-        academicYear: user.academic_year,
-        createdAt: user.created_at,
-      },
-      token,
-    });
-    
-  } catch (err) {
-    console.error("💥 LOGIN ERROR:", err.message);
-    console.error("Stack:", err.stack);
-    res.status(500).json({ 
-      success: false, 
-      error: "Server error during login: " + err.message
-    });
-  }
-});
+        academicYear: user.academicYear,
+        isHoc: user.isHoc
+    };
 
-export default router;
+    // --- Send Success Response ---
+    sendSuccess(res, { token, user: userDataToSend });
+}));
+
+module.exports = router;

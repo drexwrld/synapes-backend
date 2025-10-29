@@ -6,7 +6,7 @@ import db from './db.js'; // Use .js extension for local file imports in ESM
 
 // Import middleware (we will create these new files)
 import { protect, hocOnly } from './middleware/authMiddleware.js';
-import { sendError } from './utils/responseHandler.js';
+import { sendError } from './utils/responceHandler.js';
 
 // Import routes
 import authRoutes from './routes/auth.js';

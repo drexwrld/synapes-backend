@@ -124,7 +124,7 @@ router.post('/create-class', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Class name, date, time, and room are required' });
     }
     
-    // --- START FIX ---
+    // --- START DATE/TIME FIX ---
     // Combine date and time strings from the text inputs
     const combinedString = `${date} ${time}`; 
     
@@ -143,7 +143,16 @@ router.post('/create-class', async (req, res) => {
     
     // Convert the valid Date object into a format PostgreSQL understands (ISO 8601)
     const startTime = startTimeObject.toISOString();
-    // --- END FIX ---
+    // --- END DATE/TIME FIX ---
+
+    // --- START NUMBER FIX ---
+    // Explicitly parse numeric fields and provide safe defaults
+    const durationInt = parseInt(duration, 10);
+    const maxStudentsInt = parseInt(maxStudents, 10);
+
+    const finalDuration = !isNaN(durationInt) ? durationInt : 60;
+    const finalMaxStudents = !isNaN(maxStudentsInt) ? maxStudentsInt : 30;
+    // --- END NUMBER FIX ---
     
     console.log(`Creating new class: ${className} for HOC ${hocUserId}`);
 
@@ -151,7 +160,7 @@ router.post('/create-class', async (req, res) => {
       `INSERT INTO classes (class_name, subject, start_time, duration_minutes, location, max_students, hoc_user_id, status, created_at) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, 'scheduled', NOW()) 
        RETURNING id`,
-      [className, subject || null, startTime, duration || 60, room, maxStudents || 30, hocUserId]
+      [className, subject || null, startTime, finalDuration, room, finalMaxStudents, hocUserId]
     );
 
     res.status(201).json({ success: true, message: 'Class created successfully', data: result[0] });
@@ -215,7 +224,7 @@ router.post('/reschedule-class', async (req, res) => {
     // Frontend must send `newTime` as a full valid timestamp string (e.g., "2025-10-25 14:30:00")
     // IMPORTANT: We check hoc_user_id = $4
     const result = await query(
-      `UPDATE classes 
+       `UPDATE classes 
        SET start_time = $1, location = $2, status = 'rescheduled' 
        WHERE id = $3 AND hoc_user_id = $4 
        RETURNING id`,
@@ -299,3 +308,4 @@ router.post('/force-enable-hoc', async (req, res) => {
 
 
 export default router;
+

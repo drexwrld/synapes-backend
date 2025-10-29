@@ -1,12 +1,9 @@
 // utils/asyncHandler.js
-
 /**
- * Wraps an async function route handler to catch errors and pass them to next().
- * @param {Function} fn - The async route handler function (req, res, next) => Promise<void>
- * @returns {Function} - An Express middleware function
+ * Wraps async route handlers to catch errors and pass them to the global error handler.
  */
 const asyncHandler = (fn) => (req, res, next) => {
-  Promise.resolve(fn(req, res, next)).catch(next); // Pass any errors to the global error handler
+  Promise.resolve(fn(req, res, next)).catch(next);
 };
 
-module.exports = asyncHandler;
+export default asyncHandler;

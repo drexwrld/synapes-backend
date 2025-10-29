@@ -1,12 +1,9 @@
 // utils/responseHandler.js
 
 /**
- * Sends a standardized success response.
- * @param {object} res - Express response object.
- * @param {*} [data=null] - Optional data payload.
- * @param {number} [statusCode=200] - HTTP status code.
+ * Sends a standardized success JSON response.
  */
-const sendSuccess = (res, data = null, statusCode = 200) => {
+export const sendSuccess = (res, data = null, statusCode = 200) => {
     res.status(statusCode).json({
         success: true,
         data: data
@@ -14,17 +11,12 @@ const sendSuccess = (res, data = null, statusCode = 200) => {
 };
 
 /**
- * Sends a standardized error response.
- * @param {object} res - Express response object.
- * @param {string} [message='An unexpected error occurred'] - Error message.
- * @param {number} [statusCode=500] - HTTP status code.
+ * Sends a standardized error JSON response and logs it.
  */
-const sendError = (res, message = 'An unexpected error occurred', statusCode = 500) => {
-    console.error(`Error Response Sent (Status ${statusCode}): ${message}`); // Log errors server-side
+export const sendError = (res, message = 'An unexpected error occurred', statusCode = 500) => {
+    console.error(`Error Response Sent (Status ${statusCode}): ${message}`);
     res.status(statusCode).json({
         success: false,
         error: message
     });
 };
-
-module.exports = { sendSuccess, sendError };

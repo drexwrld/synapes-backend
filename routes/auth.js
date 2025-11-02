@@ -4,7 +4,7 @@ import { pool } from '../db.js';
 import { hashPassword, comparePassword } from '../utils/hash.js';
 import { generateToken } from '../utils/jwt.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { sendSuccess, sendError } from '../utils/responseHandler.js';
+import { sendSuccess, sendError } from '../utils/responceHandler.js';
 
 const router = express.Router();
 

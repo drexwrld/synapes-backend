@@ -2,7 +2,7 @@
 import express from 'express';
 import { pool } from '../db.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { sendSuccess, sendError } from '../utils/responseHandler.js';
+import { sendSuccess, sendError } from '../utils/responceHandler.js';
 // import { sendNotificationToClass } from '../utils/pushNotifications.js'; // Example for later
 
 const router = express.Router();

@@ -2,7 +2,7 @@
 import express from 'express';
 import { pool } from '../db.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { sendSuccess, sendError } from '../utils/responseHandler.js';
+import { sendSuccess, sendError } from '../utils/responceHandler.js';
 import fetch from 'node-fetch'; // You may need to install this: npm install node-fetch@2
 
 const router = express.Router();

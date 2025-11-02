@@ -2,7 +2,7 @@
 import express from 'express';
 import { pool } from '../db.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { sendSuccess, sendError } from '../utils/responseHandler.js';
+import { sendSuccess, sendError } from '../utils/responceHandler.js';
 
 const router = express.Router();
 

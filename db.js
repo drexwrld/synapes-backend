@@ -19,9 +19,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 // Create PostgreSQL connection pool
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: isProduction 
-    ? { rejectUnauthorized: false } // For production (Render, Heroku, etc.)
-    : false, // No SSL for local development
+  ssl: { rejectUnauthorized: false }, // ALWAYS use SSL for Render
   connectionTimeoutMillis: isProduction ? 5000 : 10000,
   idleTimeoutMillis: isProduction ? 10000 : 30000,
   max: isProduction ? 20 : 5, // Max connections in pool

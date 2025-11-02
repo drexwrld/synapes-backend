@@ -1,7 +1,7 @@
 // middleware/authMiddleware.js
 import jwt from 'jsonwebtoken';
 import { pool } from '../db.js';
-import { sendError } from '../utils/responseHandler.js';
+import { sendError } from '../utils/responceHandler.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
